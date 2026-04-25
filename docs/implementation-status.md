@@ -32,10 +32,10 @@
 - 单元+集成测试：`src/**/*.test.js`（当前 31 个测试均通过，覆盖 orchestrator/memory/modifier/llm（含熔断+指标）、文件系统集成、patch merge（含 `patch-ast` 语法守卫）、真实模块编排修复链路、以及主进程 IPC 处理器）。
 - E2E：`e2e/electron.e2e.test.js`（基于 Playwright Electron；当前环境无 Playwright 时自动 skip）。已覆盖 UI 主流程、审批拒绝分支，以及真实 Electron 进程级 IPC 桥接（`inspectEnvironment/loadMemory/saveMemory/runSnippet/requestApproval/getLLMHealth/probeLLMProviders/modifyCodebase`，含 runtime 超时与 patch 冲突分支）。
 - 语法校验：主流程核心文件 `node --check`（通过）。
-- CI：`.github/workflows/ci.yml` 已按分层执行：`push/PR` 运行 `npm test + e2e smoke`；`schedule/workflow_dispatch` 运行 `e2e full` 且失败自动重试一次。
+- CI：`.github/workflows/ci.yml` 已按分层执行：`push/PR` 运行 `npm test + e2e smoke`；`schedule/workflow_dispatch` 运行 `e2e smoke/full` matrix，并输出聚合报告（`GITHUB_STEP_SUMMARY`）。
 - IPC 扩展：新增 `llm:health` / `llm:probe`，用于输出 provider 状态、active provider 与熔断健康指标。
 
 ## 4. 下一步建议
 
 1. 将 LLM 熔断与健康指标接入 UI 仪表盘与告警通道。
-2. 为 full E2E 增加按场景分片执行（并行矩阵）与结果聚合报告。
+2. 为 nightly full E2E 增加 flaky quarantine 机制（失败用例自动标注并隔离重跑）。

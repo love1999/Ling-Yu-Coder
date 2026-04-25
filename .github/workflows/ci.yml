@@ -35,9 +35,13 @@ jobs:
       - name: Run Electron E2E smoke tests
         run: xvfb-run -a npm run test:e2e:smoke
 
-  test-nightly-full:
+  test-nightly-matrix:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [smoke, full]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,5 +58,45 @@ jobs:
       - name: Install Playwright (Chromium)
         run: npx playwright install --with-deps chromium
 
-      - name: Run Electron E2E full suite (retry once)
-        run: xvfb-run -a npm run test:e2e:full || xvfb-run -a npm run test:e2e:full
+      - name: Run Electron E2E suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          if [ "${{ matrix.suite }}" = "full" ]; then
+            xvfb-run -a npm run test:e2e:full | tee "reports/e2e-full.log" || xvfb-run -a npm run test:e2e:full | tee -a "reports/e2e-full.log"
+          else
+            xvfb-run -a npm run test:e2e:smoke | tee "reports/e2e-smoke.log"
+          fi
+
+      - name: Upload E2E logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs-${{ matrix.suite }}
+          path: reports/*.log
+
+  e2e-report:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: test-nightly-matrix
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download E2E logs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: e2e-logs-*
+          merge-multiple: true
+          path: reports
+
+      - name: Build E2E summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "## E2E Matrix Summary" >> "$GITHUB_STEP_SUMMARY"
+          for file in reports/*.log; do
+            suite="$(basename "$file" .log)"
+            pass="$(grep -E '^# pass ' "$file" | awk '{print $3}' || echo 0)"
+            fail="$(grep -E '^# fail ' "$file" | awk '{print $3}' || echo 0)"
+            skipped="$(grep -E '^# skipped ' "$file" | awk '{print $3}' || echo 0)"
+            echo "- ${suite}: pass=${pass}, fail=${fail}, skipped=${skipped}" >> "$GITHUB_STEP_SUMMARY"
+          done
