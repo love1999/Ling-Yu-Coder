@@ -1,8 +1,29 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import vm from 'node:vm';
 
 const textHash = (content) => createHash('sha1').update(content || '').digest('hex');
+
+const jsLikeExt = new Set(['.js', '.mjs', '.cjs']);
+
+const validateSyntaxIfNeeded = ({ filePath, content, strategy }) => {
+  if (strategy !== 'patch-ast') {
+    return { ok: true };
+  }
+
+  const ext = path.extname(filePath);
+  if (!jsLikeExt.has(ext)) {
+    return { ok: true };
+  }
+
+  try {
+    new vm.Script(content || '');
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: `syntax check failed: ${error.message}` };
+  }
+};
 
 const threeWayLineMerge = ({ base, current, incoming }) => {
   const baseLines = (base || '').split('\n');
@@ -47,8 +68,9 @@ const threeWayLineMerge = ({ base, current, incoming }) => {
   };
 };
 
-const tryPatchMerge = ({ currentContent, incomingContent, change, options }) => {
-  if (options.mergeStrategy !== 'patch') {
+const tryPatchMerge = ({ filePath, currentContent, incomingContent, change, options }) => {
+  const strategy = options.mergeStrategy;
+  if (strategy !== 'patch' && strategy !== 'patch-ast') {
     return { merged: false, reason: 'merge strategy disabled' };
   }
 
@@ -66,10 +88,21 @@ const tryPatchMerge = ({ currentContent, incomingContent, change, options }) => 
     return { merged: false, reason: 'patch merge conflict' };
   }
 
+  const syntaxCheck = validateSyntaxIfNeeded({
+    filePath,
+    content: mergeResult.mergedContent,
+    strategy
+  });
+
+  if (!syntaxCheck.ok) {
+    return { merged: false, reason: syntaxCheck.reason };
+  }
+
   return {
     merged: true,
     mergedContent: mergeResult.mergedContent,
-    hasConflict: mergeResult.hasConflict
+    hasConflict: mergeResult.hasConflict,
+    strategy
   };
 };
 
@@ -104,9 +137,11 @@ export const applyCodebaseChanges = async ({ root, changes, options = {} }) => {
       let nextContent = change.content;
       let merged = false;
       let mergeConflict = false;
+      let mergeStrategy = null;
 
       if (change.expectedHash && textHash(content || '') !== change.expectedHash) {
         const patchMerge = tryPatchMerge({
+          filePath,
           currentContent: content || '',
           incomingContent: change.content,
           change,
@@ -122,6 +157,7 @@ export const applyCodebaseChanges = async ({ root, changes, options = {} }) => {
         nextContent = patchMerge.mergedContent;
         merged = true;
         mergeConflict = Boolean(patchMerge.hasConflict);
+        mergeStrategy = patchMerge.strategy;
       }
 
       if (!dryRun) {
@@ -132,7 +168,8 @@ export const applyCodebaseChanges = async ({ root, changes, options = {} }) => {
       applied.push({
         path: change.path,
         merged,
-        mergeConflict
+        mergeConflict,
+        mergeStrategy
       });
     } catch (error) {
       failed.push({ path: change.path, reason: error.message });
@@ -168,3 +205,4 @@ export const applyCodebaseChanges = async ({ root, changes, options = {} }) => {
 
 export const hashContent = textHash;
 export const mergePatchContent = threeWayLineMerge;
+export const syntaxAwareMergeGuard = validateSyntaxIfNeeded;

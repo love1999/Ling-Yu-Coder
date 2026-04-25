@@ -107,3 +107,41 @@ test('applyCodebaseChanges patch merge reports conflict when both sides changed 
   assert.equal(result.ok, false);
   assert.match(result.failed[0].reason, /patch merge conflict/);
 });
+
+test('applyCodebaseChanges patch-ast merge passes syntax guard for valid js result', async () => {
+  const root = await makeTempDir();
+  const file = path.join(root, 'a.js');
+  const base = 'const a = 1;\nconst b = 2;';
+  const current = 'const a = 10;\nconst b = 2;';
+  const incoming = 'const a = 1;\nconst b = 20;';
+
+  await fs.writeFile(file, current, 'utf8');
+
+  const result = await applyCodebaseChanges({
+    root,
+    changes: [{ path: 'a.js', content: incoming, baseContent: base, expectedHash: hashContent(base) }],
+    options: { mergeStrategy: 'patch-ast' }
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.applied[0].mergeStrategy, 'patch-ast');
+});
+
+test('applyCodebaseChanges patch-ast merge fails when merged js is syntactically invalid', async () => {
+  const root = await makeTempDir();
+  const file = path.join(root, 'a.js');
+  const base = 'const a = 1;\nconst b = 2;';
+  const current = 'const a = 2;\nconst b = 2;';
+  const incoming = 'const a = 1;\nconst b = ;';
+
+  await fs.writeFile(file, current, 'utf8');
+
+  const result = await applyCodebaseChanges({
+    root,
+    changes: [{ path: 'a.js', content: incoming, baseContent: base, expectedHash: hashContent(base) }],
+    options: { mergeStrategy: 'patch-ast' }
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.failed[0].reason, /syntax check failed/);
+});
