@@ -34,12 +34,29 @@ export class LLMManager {
         cooldownUntil: null
       }
     };
+    this.metrics = {
+      totalProbes: 0,
+      successfulProbes: 0,
+      failedProbes: 0,
+      openedCircuits: 0,
+      recoveredCircuits: 0,
+      lastProbeAt: null
+    };
     this.active = 'online';
     this.healthTimer = null;
   }
 
   listProviders() {
     return this.providers;
+  }
+
+  getHealthMetrics() {
+    return {
+      ...this.metrics,
+      probeSuccessRate: this.metrics.totalProbes === 0
+        ? 1
+        : this.metrics.successfulProbes / this.metrics.totalProbes
+    };
   }
 
   switchProvider(mode) {
@@ -57,7 +74,11 @@ export class LLMManager {
     const provider = this.providers[mode];
     if (!provider) return;
 
+    this.metrics.totalProbes += 1;
+    this.metrics.lastProbeAt = nowTs();
+
     if (healthy) {
+      this.metrics.successfulProbes += 1;
       provider.consecutiveFailures = 0;
       provider.lastSuccessTs = nowTs();
       provider.state = 'healthy';
@@ -65,11 +86,16 @@ export class LLMManager {
       return;
     }
 
+    this.metrics.failedProbes += 1;
     provider.consecutiveFailures += 1;
+    const prevState = provider.state;
     provider.state = provider.consecutiveFailures >= this.policy.failureThreshold ? 'open' : 'degraded';
 
     if (provider.state === 'open') {
       provider.cooldownUntil = nowTs() + this.policy.cooldownMs;
+      if (prevState !== 'open') {
+        this.metrics.openedCircuits += 1;
+      }
     }
   }
 
@@ -82,6 +108,7 @@ export class LLMManager {
     if (provider.cooldownUntil && nowTs() >= provider.cooldownUntil) {
       provider.state = 'degraded';
       provider.cooldownUntil = null;
+      this.metrics.recoveredCircuits += 1;
       return true;
     }
 
@@ -108,7 +135,10 @@ export class LLMManager {
       this.providers[item.mode].healthy = item.healthy;
     });
 
-    return this.providers;
+    return {
+      providers: this.providers,
+      metrics: this.getHealthMetrics()
+    };
   }
 
   startHealthProbe(intervalMs = 30000) {
@@ -156,6 +186,7 @@ export class LLMManager {
         activeProvider: chosen,
         providers: this.providers,
         healthStatus: this.providers[chosen].state,
+        healthMetrics: this.getHealthMetrics(),
         completion: `[${chosen}] 模型回执: ${prompt.slice(0, 80)}`
       }, Date.now() - start);
     } catch (error) {

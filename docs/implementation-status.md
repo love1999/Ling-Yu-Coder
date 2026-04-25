@@ -15,7 +15,7 @@
 | Compiler Agent | `src/agents/compilerAgent.js` | ✅ 已实现 | `acorn` 语法检查与定位 |
 | Runtime Agent | `src/agents/runtimeAgent.js` | ✅ 已实现 | 沙箱执行结果封装 |
 | Documentation Writer | `src/agents/documentationWriter.js` | ✅ 已实现 | 输出 markdown 执行报告 |
-| LLM Manage | `src/agents/llmManager.js` | ✅ 已实现 | 在线/本地切换 + 健康回退 + 定时健康探测 + 分级熔断冷却 |
+| LLM Manage | `src/agents/llmManager.js` | ✅ 已实现 | 在线/本地切换 + 健康回退 + 定时健康探测 + 分级熔断冷却 + 健康指标统计 |
 | Approval Gate | `src/core/approvalGate.js` | ✅ 已实现 | 写操作前审批门禁 |
 | Memory Module | `src/core/memoryModule.js` | ✅ 已实现 | 本地持久化记忆读写 + TTL/最大条数裁剪 + 过期归档 |
 | Environment Inspector | `src/core/environmentInspector.js` | ✅ 已实现 | 环境快照采集 |
@@ -29,7 +29,7 @@
 
 ## 3. 测试与验证状态
 
-- 单元+集成测试：`src/**/*.test.js`（当前 25 个测试均通过，覆盖 orchestrator/memory/modifier/llm（含熔断）、文件系统集成、patch merge、真实模块编排修复链路、以及主进程 IPC 处理器）。
+- 单元+集成测试：`src/**/*.test.js`（当前 26 个测试均通过，覆盖 orchestrator/memory/modifier/llm（含熔断+指标）、文件系统集成、patch merge、真实模块编排修复链路、以及主进程 IPC 处理器）。
 - 语法校验：主流程核心文件 `node --check`（通过）。
 
 ## 4. 下一步建议
@@ -37,4 +37,4 @@
 1. 为 patch-level 合并增加 AST/语法感知能力（当前为行级三方合并）。
 2. 引入端到端 UI 自动化测试（Playwright/Electron E2E）。
 3. 增加 Electron 真进程级 IPC E2E（当前已完成 handler 级集成测试）。
-4. 增加 LLM provider 熔断状态可观测指标（告警/仪表盘）。
+4. 将 LLM 熔断与健康指标接入 UI 仪表盘与告警通道。

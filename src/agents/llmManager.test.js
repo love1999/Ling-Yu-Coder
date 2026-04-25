@@ -20,6 +20,7 @@ test('llm manager falls back when active provider unhealthy', async () => {
   const res = await manager.run(envelope);
   assert.equal(res.ok, true);
   assert.equal(res.result.activeProvider, 'local');
+  assert.ok(res.result.healthMetrics);
 });
 
 test('llm manager health probe start/stop works', () => {
@@ -41,6 +42,7 @@ test('llm manager opens circuit after consecutive failures', async () => {
   const provider = manager.listProviders().online;
   assert.equal(provider.state, 'open');
   assert.equal(manager.isProviderAvailable('online'), false);
+  assert.equal(manager.getHealthMetrics().openedCircuits, 1);
 });
 
 test('llm manager allows provider again after cooldown', async () => {
@@ -53,4 +55,19 @@ test('llm manager allows provider again after cooldown', async () => {
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(manager.isProviderAvailable('online'), true);
   assert.equal(manager.listProviders().online.state, 'degraded');
+  assert.equal(manager.getHealthMetrics().recoveredCircuits, 1);
+});
+
+test('llm manager metrics track probe success rate', async () => {
+  const manager = new LLMManager();
+  manager.setProviderHealth('online', true);
+  manager.setProviderHealth('local', false);
+
+  await manager.probeAllProviders();
+  const metrics = manager.getHealthMetrics();
+
+  assert.equal(metrics.totalProbes, 2);
+  assert.equal(metrics.successfulProbes, 1);
+  assert.equal(metrics.failedProbes, 1);
+  assert.equal(metrics.probeSuccessRate, 0.5);
 });
