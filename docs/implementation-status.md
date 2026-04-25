@@ -30,7 +30,7 @@
 ## 3. 测试与验证状态
 
 - 单元+集成测试：`src/**/*.test.js`（当前 31 个测试均通过，覆盖 orchestrator/memory/modifier/llm（含熔断+指标）、文件系统集成、patch merge（含 `patch-ast` 语法守卫）、真实模块编排修复链路、以及主进程 IPC 处理器）。
-- E2E：`e2e/electron.e2e.test.js`（基于 Playwright Electron；当前环境无 Playwright 时自动 skip）。已覆盖 UI 主流程、审批拒绝分支，以及真实 Electron 进程级 IPC 桥接（`inspectEnvironment/loadMemory/saveMemory/runSnippet/requestApproval/getLLMHealth/probeLLMProviders`，含 runtime 超时分支）。
+- E2E：`e2e/electron.e2e.test.js`（基于 Playwright Electron；当前环境无 Playwright 时自动 skip）。已覆盖 UI 主流程、审批拒绝分支，以及真实 Electron 进程级 IPC 桥接（`inspectEnvironment/loadMemory/saveMemory/runSnippet/requestApproval/getLLMHealth/probeLLMProviders/modifyCodebase`，含 runtime 超时与 patch 冲突分支）。
 - 语法校验：主流程核心文件 `node --check`（通过）。
 - CI：新增 `.github/workflows/ci.yml`，在 Ubuntu 上自动执行 `npm test` + Playwright Chromium 安装 + `xvfb-run npm run test:e2e`。
 - IPC 扩展：新增 `llm:health` / `llm:probe`，用于输出 provider 状态、active provider 与熔断健康指标。
@@ -38,4 +38,4 @@
 ## 4. 下一步建议
 
 1. 将 LLM 熔断与健康指标接入 UI 仪表盘与告警通道。
-2. 增加失败场景 E2E（冲突回滚）并在 CI 中分层执行（smoke/nightly）。
+2. 在 CI 中分层执行 E2E（smoke/nightly）并增加慢用例重试/分片策略。

@@ -1,5 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 const hasPlaywright = async () => {
   try {
@@ -9,6 +13,8 @@ const hasPlaywright = async () => {
     return false;
   }
 };
+
+const sha1 = (content) => createHash('sha1').update(content || '').digest('hex');
 
 test('electron e2e: run pipeline and generate doc', async (t) => {
   if (!(await hasPlaywright())) {
@@ -131,6 +137,29 @@ test('electron e2e: preload IPC bridge works in real process', async (t) => {
     const probe = await page.evaluate(() => window.lingYuAPI.probeLLMProviders());
     assert.equal(probe.ok, true);
     assert.ok(probe.metrics.totalProbes >= 1);
+
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'lingyu-e2e-modify-'));
+    await page.evaluate(async (root) => {
+      await window.lingYuAPI.modifyCodebase({
+        root,
+        changes: [{ path: 'conflict.txt', content: 'current-change' }],
+        options: { transactional: true }
+      });
+    }, tmpRoot);
+
+    const conflictResult = await page.evaluate((payload) => window.lingYuAPI.modifyCodebase(payload), {
+      root: tmpRoot,
+      changes: [{
+        path: 'conflict.txt',
+        content: 'incoming-change',
+        baseContent: 'same',
+        expectedHash: sha1('same')
+      }],
+      options: { mergeStrategy: 'patch', transactional: true }
+    });
+
+    assert.equal(conflictResult.ok, false);
+    assert.match(conflictResult.failed?.[0]?.reason || '', /patch merge conflict/);
   } finally {
     await app.close();
   }
