@@ -32,12 +32,12 @@
 - 单元+集成测试：`src/**/*.test.js`（当前 31 个测试均通过，覆盖 orchestrator/memory/modifier/llm（含熔断+指标）、文件系统集成、patch merge（含 `patch-ast` 语法守卫）、真实模块编排修复链路、以及主进程 IPC 处理器）。
 - E2E：`e2e/electron.e2e.test.js`（基于 Playwright Electron；当前环境无 Playwright 时自动 skip）。已覆盖 UI 主流程、审批拒绝分支，以及真实 Electron 进程级 IPC 桥接（`inspectEnvironment/loadMemory/saveMemory/runSnippet/requestApproval/getLLMHealth/probeLLMProviders/modifyCodebase`，含 runtime 超时与 patch 冲突分支）。
 - 语法校验：主流程核心文件 `node --check`（通过）。
-- CI：`.github/workflows/ci.yml` 已按分层执行：`push/PR` 运行 `npm test + e2e smoke`；`schedule/workflow_dispatch` 运行 `e2e smoke/full` matrix，并输出聚合报告（`GITHUB_STEP_SUMMARY`）。当 nightly full 失败时，会自动提取失败用例进入 quarantine rerun（隔离重跑），并把 flaky 统计写入历史缓存做趋势追踪（30 天窗口 + 按天衰减 score）；同时启用 flake gate（warn/block 阈值）联动告警与阻断，且阈值支持按分支默认值与仓库变量覆盖。
+- CI：`.github/workflows/ci.yml` 已按分层执行：`push/PR` 运行 `npm test + e2e smoke`；`schedule/workflow_dispatch` 运行 `e2e smoke/full` matrix，并输出聚合报告（`GITHUB_STEP_SUMMARY`）。当 nightly full 失败时，会自动提取失败用例进入 quarantine rerun（隔离重跑），并把 flaky 统计写入历史缓存做趋势追踪（30 天窗口 + 按天衰减 score）；同时启用 flake gate（warn/block 阈值）联动告警与阻断，且阈值支持按分支默认值、仓库变量覆盖以及静默窗口（维护窗口）warn-only 模式。
 - IPC 扩展：新增 `llm:health` / `llm:probe`，用于输出 provider 状态、active provider 与熔断健康指标。
 - UI 仪表盘：`src/index.html` + `src/renderer.js` 已接入 LLM 健康看板和告警列表（open/degraded/probeSuccessRate 下降告警）。
-- 外部告警 MVP：已支持配置 Webhook URL/Secret，并在健康告警触发时通过 `alert:webhook` 推送（含去重时间窗、重试退避与失败落盘队列）。
+- 外部告警 MVP：已支持配置 Webhook URL/Secret，并在健康告警触发时通过 `alert:webhook` 推送（含签名版本 `v1`、去重时间窗、重试退避与失败落盘队列）。
 
 ## 4. 下一步建议
 
-1. 为 Webhook 告警增加签名版本管理与接收端验签示例（文档 + SDK snippet）。
-2. 为 flake gate 增加“静默窗口/维护窗口”机制，避免发布窗口误阻断。
+1. 为 Webhook 告警增加多语言 SDK snippet（Node/Python/Go）和接收端最小落地模板。
+2. 为 flake gate 增加“静默窗口命中率”统计，评估是否需要动态调窗。

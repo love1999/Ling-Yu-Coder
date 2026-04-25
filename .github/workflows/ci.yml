@@ -180,6 +180,8 @@ jobs:
     env:
       FLAKE_WARN_THRESHOLD: ${{ vars.FLAKE_WARN_THRESHOLD != '' && vars.FLAKE_WARN_THRESHOLD || (github.ref_name == 'main' && '3' || '5') }}
       FLAKE_BLOCK_THRESHOLD: ${{ vars.FLAKE_BLOCK_THRESHOLD != '' && vars.FLAKE_BLOCK_THRESHOLD || (github.ref_name == 'main' && '8' || '13') }}
+      FLAKE_GATE_SILENT_WINDOW_UTC: ${{ vars.FLAKE_GATE_SILENT_WINDOW_UTC != '' && vars.FLAKE_GATE_SILENT_WINDOW_UTC || '00:00-00:00' }}
+      FLAKE_GATE_WARN_ONLY: ${{ vars.FLAKE_GATE_WARN_ONLY != '' && vars.FLAKE_GATE_WARN_ONLY || 'false' }}
     steps:
       - name: Download E2E logs
         uses: actions/download-artifact@v4
@@ -237,8 +239,32 @@ jobs:
           const maxScore = entries.reduce((m, [, info]) => Math.max(m, Number(info.score || 0)), 0);
           const warn = Number(process.env.FLAKE_WARN_THRESHOLD || 3);
           const block = Number(process.env.FLAKE_BLOCK_THRESHOLD || 8);
+          const forceWarnOnly = String(process.env.FLAKE_GATE_WARN_ONLY || 'false').toLowerCase() === 'true';
+          const window = process.env.FLAKE_GATE_SILENT_WINDOW_UTC || '00:00-00:00';
 
-          if (maxScore >= block) {
+          const toMinutes = (hhmm) => {
+            const [h, m] = String(hhmm || '').split(':').map((v) => Number(v));
+            if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+            return (h * 60) + m;
+          };
+
+          const inSilentWindow = (() => {
+            const [startRaw, endRaw] = window.split('-');
+            const start = toMinutes(startRaw);
+            const end = toMinutes(endRaw);
+            if (start === null || end === null || start === end) return false;
+            const now = new Date();
+            const nowMin = (now.getUTCHours() * 60) + now.getUTCMinutes();
+            if (start < end) return nowMin >= start && nowMin < end;
+            return nowMin >= start || nowMin < end;
+          })();
+
+          const warnOnlyMode = forceWarnOnly || inSilentWindow;
+          if (warnOnlyMode) {
+            console.log(`::warning::Flake gate running in warn-only mode (force=${forceWarnOnly}, window=${window}, inWindow=${inSilentWindow})`);
+          }
+
+          if (!warnOnlyMode && maxScore >= block) {
             console.error(`Flake gate BLOCKED: maxScore=${maxScore} >= block=${block}`);
             process.exit(1);
           }

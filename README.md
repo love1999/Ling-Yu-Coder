@@ -48,10 +48,10 @@ npm run test:e2e:full
 
 项目已提供 GitHub Actions CI（`.github/workflows/ci.yml`）：`push/PR` 执行 `npm test + E2E smoke`；`schedule/workflow_dispatch` 以 matrix 执行 `smoke/full`，并生成 E2E 聚合报告（`GITHUB_STEP_SUMMARY`）。
 nightly full 失败时会触发 quarantine rerun，并把失败用例写入 flake history（按测试名统计，30 天窗口 + 按天衰减 score）用于趋势观察。
-CI 已把 flake 趋势接入告警门槛：score 超过 warning 阈值会标黄，超过 blocking 阈值会直接让 nightly 报警并失败；阈值支持按分支默认值并可由仓库变量覆盖。
+CI 已把 flake 趋势接入告警门槛：score 超过 warning 阈值会标黄，超过 blocking 阈值会直接让 nightly 报警并失败；阈值支持按分支默认值、仓库变量覆盖与维护窗口 warn-only 模式。
 
 UI 已接入 LLM 健康仪表盘：展示 active provider、online/local 状态、健康指标，并在熔断/退化/探测成功率下降时写入告警列表。
-已支持外部告警 Webhook MVP：在 UI 录入 webhook URL/Secret 后，健康告警会通过 `alert:webhook` 发送（内置 5 分钟同类告警去重，失败自动重试 + 失败落盘队列）。
+已支持外部告警 Webhook MVP：在 UI 录入 webhook URL/Secret 后，健康告警会通过 `alert:webhook` 发送（签名版本 `v1`，内置 5 分钟同类告警去重，失败自动重试 + 失败落盘队列）。
 
 ## 项目结构
 

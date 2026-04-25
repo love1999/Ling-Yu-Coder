@@ -140,6 +140,7 @@ export const registerIpcHandlers = ({ ipcMain, app, dialog, llmManager = null, h
           headers: {
             'content-type': 'application/json',
             ...(token ? { 'x-lingyu-token': token } : {}),
+            ...(signature ? { 'x-lingyu-signature-version': 'v1' } : {}),
             ...(signature ? { 'x-lingyu-signature': signature } : {})
           },
           body

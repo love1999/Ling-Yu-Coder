@@ -158,6 +158,7 @@ test('ipcHandlers: webhook alert posts payload when url is valid', async () => {
   assert.equal(result.status, 204);
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, 'https://example.com/hook');
+  assert.equal(requests[0].init.headers['x-lingyu-signature-version'], 'v1');
   assert.ok(requests[0].init.headers['x-lingyu-signature']);
 });
 

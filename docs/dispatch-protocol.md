@@ -286,3 +286,65 @@ interface RuntimeContext {
 - 当前 `renderer.js` 已具备串行流水线，可升级为标准消息信封驱动。
 - 当前 `main.js` 的 `runtime:run` 与 `codebase:modify` 已具备基本安全约束；建议补充失败列表与原子写策略。
 - 当前 `LLMManager` 已有在线/本地切换；建议补充健康检查与自动降级。
+
+## 9. Webhook 告警签名规范（v1）
+
+为支持外部告警通道验签，约定：
+
+- Header:
+  - `x-lingyu-signature-version: v1`
+  - `x-lingyu-signature: <hex(hmac_sha256(secret, rawBody))>`
+- Body: 必须使用发送时原始 JSON 字符串参与签名（不要二次格式化）。
+
+### 9.1 发送端建议（SDK snippet）
+
+```js
+import { createHmac } from 'node:crypto';
+
+export const buildLingYuWebhookHeaders = ({ secret, rawBody }) => {
+  const signature = createHmac('sha256', secret).update(rawBody).digest('hex');
+  return {
+    'content-type': 'application/json',
+    'x-lingyu-signature-version': 'v1',
+    'x-lingyu-signature': signature
+  };
+};
+```
+
+### 9.2 接收端验签示例（Node/Express）
+
+```js
+import express from 'express';
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
+const app = express();
+
+app.use(express.json({
+  verify: (req, _res, buf) => {
+    req.rawBody = buf.toString('utf8');
+  }
+}));
+
+const verifySignature = ({ secret, rawBody, receivedSignature }) => {
+  const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
+  const a = Buffer.from(expected, 'utf8');
+  const b = Buffer.from(receivedSignature || '', 'utf8');
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+};
+
+app.post('/lingyu/webhook', (req, res) => {
+  const version = req.header('x-lingyu-signature-version');
+  const sig = req.header('x-lingyu-signature');
+  if (version !== 'v1') return res.status(400).json({ ok: false, reason: 'unsupported signature version' });
+
+  const ok = verifySignature({
+    secret: process.env.LINGYU_WEBHOOK_SECRET,
+    rawBody: req.rawBody,
+    receivedSignature: sig
+  });
+  if (!ok) return res.status(401).json({ ok: false, reason: 'bad signature' });
+
+  return res.json({ ok: true });
+});
+```
