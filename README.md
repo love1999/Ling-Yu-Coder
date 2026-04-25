@@ -41,6 +41,8 @@ npm test
 npm run test:e2e
 ```
 
+> `npm run test:e2e` 当前包含两类 Electron E2E：UI 主流程（点击运行并生成文档）与预加载 `lingYuAPI` 的真实进程级 IPC 桥接验证（环境检测/记忆读写/运行沙箱/审批门禁）。
+
 ## 项目结构
 
 ```text
