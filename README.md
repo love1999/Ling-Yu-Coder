@@ -50,6 +50,7 @@ npm run test:e2e:full
 nightly full 失败时会触发 quarantine rerun，并把失败用例写入 flake history（按测试名统计，30 天窗口 + 按天衰减 score）用于趋势观察。
 
 UI 已接入 LLM 健康仪表盘：展示 active provider、online/local 状态、健康指标，并在熔断/退化/探测成功率下降时写入告警列表。
+已支持外部告警 Webhook MVP：在 UI 录入 webhook URL 后，健康告警会通过 `alert:webhook` 发送（内置 5 分钟同类告警去重）。
 
 ## 项目结构
 

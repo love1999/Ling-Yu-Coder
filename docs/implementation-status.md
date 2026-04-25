@@ -35,8 +35,9 @@
 - CI：`.github/workflows/ci.yml` 已按分层执行：`push/PR` 运行 `npm test + e2e smoke`；`schedule/workflow_dispatch` 运行 `e2e smoke/full` matrix，并输出聚合报告（`GITHUB_STEP_SUMMARY`）。当 nightly full 失败时，会自动提取失败用例进入 quarantine rerun（隔离重跑），并把 flaky 统计写入历史缓存做趋势追踪（30 天窗口 + 按天衰减 score）。
 - IPC 扩展：新增 `llm:health` / `llm:probe`，用于输出 provider 状态、active provider 与熔断健康指标。
 - UI 仪表盘：`src/index.html` + `src/renderer.js` 已接入 LLM 健康看板和告警列表（open/degraded/probeSuccessRate 下降告警）。
+- 外部告警 MVP：已支持配置 Webhook URL，并在健康告警触发时通过 `alert:webhook` 推送（含去重时间窗）。
 
 ## 4. 下一步建议
 
-1. 将健康告警接入外部通知通道（如企业微信/Slack/Webhook）。
-2. 将 flake 趋势与 CI 告警门槛联动（例如 score 超阈值自动标红或阻断发布）。
+1. 将 flake 趋势与 CI 告警门槛联动（例如 score 超阈值自动标红或阻断发布）。
+2. 为 Webhook 告警增加签名校验、重试退避和失败落盘队列。

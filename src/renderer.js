@@ -21,6 +21,8 @@ const logEl = document.getElementById('log');
 const docEl = document.getElementById('doc');
 const providerSelect = document.getElementById('providerSelect');
 const refreshHealthBtn = document.getElementById('refreshHealthBtn');
+const webhookUrlEl = document.getElementById('webhookUrl');
+const saveWebhookBtn = document.getElementById('saveWebhookBtn');
 const healthSummaryEl = document.getElementById('healthSummary');
 const healthMetricsEl = document.getElementById('healthMetrics');
 const healthAlertsEl = document.getElementById('healthAlerts');
@@ -35,12 +37,39 @@ llmManager.startHealthProbe(15000);
 window.addEventListener('beforeunload', () => llmManager.stopHealthProbe());
 
 const alertQueue = [];
+const alertLastSent = new Map();
+const ALERT_DEDUP_MS = 5 * 60 * 1000;
+const WEBHOOK_STORAGE_KEY = 'lingyu.webhook.url';
+
+webhookUrlEl.value = localStorage.getItem(WEBHOOK_STORAGE_KEY) || '';
 
 const pushHealthAlert = (message, level = 'warn') => {
   const entry = `[${new Date().toLocaleTimeString()}][${level}] ${message}`;
   alertQueue.unshift(entry);
   if (alertQueue.length > 8) alertQueue.length = 8;
   healthAlertsEl.innerHTML = alertQueue.map((item) => `<li>${item}</li>`).join('');
+};
+
+const sendWebhookAlertIfConfigured = async ({ level, message, health }) => {
+  const url = localStorage.getItem(WEBHOOK_STORAGE_KEY);
+  if (!url) return;
+
+  const dedupeKey = `${level}:${message}`;
+  const now = Date.now();
+  const lastSent = alertLastSent.get(dedupeKey) || 0;
+  if (now - lastSent < ALERT_DEDUP_MS) return;
+
+  alertLastSent.set(dedupeKey, now);
+  await window.lingYuAPI.sendWebhookAlert({
+    url,
+    event: `llm.health.${level}`,
+    data: {
+      message,
+      active: health?.active,
+      providers: health?.providers,
+      metrics: health?.metrics
+    }
+  });
 };
 
 const summaryClass = (providers = {}) => {
@@ -75,13 +104,19 @@ const pollHealthDashboard = async (triggerProbe = false) => {
 
     if (health?.ok) {
       if (health.providers?.online?.state === 'open') {
-        pushHealthAlert('在线 provider 处于熔断(open)状态', 'danger');
+        const message = '在线 provider 处于熔断(open)状态';
+        pushHealthAlert(message, 'danger');
+        await sendWebhookAlertIfConfigured({ level: 'danger', message, health });
       } else if (health.providers?.online?.state === 'degraded') {
-        pushHealthAlert('在线 provider 健康退化(degraded)', 'warn');
+        const message = '在线 provider 健康退化(degraded)';
+        pushHealthAlert(message, 'warn');
+        await sendWebhookAlertIfConfigured({ level: 'warn', message, health });
       }
 
       if ((health.metrics?.probeSuccessRate ?? 1) < 0.8) {
-        pushHealthAlert(`probeSuccessRate 下降至 ${health.metrics.probeSuccessRate}`, 'warn');
+        const message = `probeSuccessRate 下降至 ${health.metrics.probeSuccessRate}`;
+        pushHealthAlert(message, 'warn');
+        await sendWebhookAlertIfConfigured({ level: 'warn', message, health });
       }
     }
   } catch (error) {
@@ -124,6 +159,18 @@ providerSelect.addEventListener('change', (event) => {
 
 refreshHealthBtn.addEventListener('click', async () => {
   await pollHealthDashboard(true);
+});
+
+saveWebhookBtn.addEventListener('click', () => {
+  const value = (webhookUrlEl.value || '').trim();
+  if (!value) {
+    localStorage.removeItem(WEBHOOK_STORAGE_KEY);
+    pushHealthAlert('已清空外部告警 Webhook', 'warn');
+    return;
+  }
+
+  localStorage.setItem(WEBHOOK_STORAGE_KEY, value);
+  pushHealthAlert('已保存外部告警 Webhook', 'warn');
 });
 
 document.getElementById('rememberBtn').addEventListener('click', async () => {

@@ -6,7 +6,7 @@ import { applyCodebaseChanges } from './applyCodebaseChanges.js';
 
 const MEMORY_FILE = 'memory.json';
 
-export const registerIpcHandlers = ({ ipcMain, app, dialog, llmManager = null }) => {
+export const registerIpcHandlers = ({ ipcMain, app, dialog, llmManager = null, httpPost = fetch }) => {
   const getMemoryPath = () => path.join(app.getPath('userData'), MEMORY_FILE);
 
   ipcMain.handle('environment:inspect', () => ({
@@ -99,5 +99,35 @@ export const registerIpcHandlers = ({ ipcMain, app, dialog, llmManager = null })
       active: llmManager.active,
       ...report
     };
+  });
+
+  ipcMain.handle('alert:webhook', async (_evt, payload = {}) => {
+    const { url, event = 'unknown', data = {}, token = '' } = payload;
+    if (typeof url !== 'string' || !/^https?:\/\//.test(url)) {
+      return { ok: false, reason: 'invalid webhook url' };
+    }
+
+    try {
+      const response = await httpPost(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(token ? { 'x-lingyu-token': token } : {})
+        },
+        body: JSON.stringify({
+          source: 'ling-yu',
+          event,
+          data,
+          ts: new Date().toISOString()
+        })
+      });
+
+      return {
+        ok: response.ok,
+        status: response.status
+      };
+    } catch (error) {
+      return { ok: false, reason: error.message };
+    }
   });
 };

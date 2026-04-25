@@ -35,6 +35,13 @@ main {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+input {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 8px 10px;
+  min-width: 220px;
 }
 button {
   border: none;

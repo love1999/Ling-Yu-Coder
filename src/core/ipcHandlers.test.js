@@ -51,7 +51,9 @@ const createIpcHarness = (paths = {}, overrides = {}) => {
     })
   };
 
-  registerIpcHandlers({ ipcMain, app, dialog, llmManager });
+  const httpPost = overrides.httpPost || (async () => ({ ok: true, status: 200 }));
+
+  registerIpcHandlers({ ipcMain, app, dialog, llmManager, httpPost });
 
   const invoke = async (name, payload) => handlers.get(name)({}, payload);
 
@@ -129,4 +131,44 @@ test('ipcHandlers: llm probe runs and returns report', async () => {
   assert.equal(result.ok, true);
   assert.equal(result.providers.local.healthy, true);
   assert.equal(result.metrics.totalProbes, 2);
+});
+
+test('ipcHandlers: webhook alert posts payload when url is valid', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lingyu-ipc-'));
+  const requests = [];
+  const harness = createIpcHarness(
+    { userData: root, documents: root },
+    {
+      httpPost: async (url, init) => {
+        requests.push({ url, init });
+        return { ok: true, status: 204 };
+      }
+    }
+  );
+
+  const result = await harness.invoke('alert:webhook', {
+    url: 'https://example.com/hook',
+    event: 'llm.health.warn',
+    data: { x: 1 },
+    token: 'abc'
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.status, 204);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, 'https://example.com/hook');
+});
+
+test('ipcHandlers: webhook alert rejects invalid url', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lingyu-ipc-'));
+  const harness = createIpcHarness({ userData: root, documents: root });
+
+  const result = await harness.invoke('alert:webhook', {
+    url: 'ftp://invalid',
+    event: 'x',
+    data: {}
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /invalid webhook url/);
 });

@@ -8,5 +8,6 @@ contextBridge.exposeInMainWorld('lingYuAPI', {
   requestApproval: (message) => ipcRenderer.invoke('approval:confirm', message),
   modifyCodebase: (payload) => ipcRenderer.invoke('codebase:modify', payload),
   getLLMHealth: () => ipcRenderer.invoke('llm:health'),
-  probeLLMProviders: () => ipcRenderer.invoke('llm:probe')
+  probeLLMProviders: () => ipcRenderer.invoke('llm:probe'),
+  sendWebhookAlert: (payload) => ipcRenderer.invoke('alert:webhook', payload)
 });
