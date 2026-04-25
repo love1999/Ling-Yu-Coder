@@ -7,7 +7,7 @@
 | 模块 | 文件 | 状态 | 说明 |
 |---|---|---|---|
 | Protocol | `src/core/protocol.js` | ✅ 已实现 | 统一 Envelope/Response/ErrorCode |
-| Orchestrator | `src/core/orchestrator.js` | ✅ 已实现 | 串行调度 + 阶段失败保护 + 审批门禁 + 编译失败自动修复重试 |
+| Orchestrator | `src/core/orchestrator.js` | ✅ 已实现 | 串行调度 + 阶段失败保护 + 审批门禁 + 编译/运行失败自动修复重试 |
 | Clarifier Agent | `src/agents/clarifierAgent.js` | ✅ 已实现 | 结构化拆解目标/约束/验收项 |
 | Retriever Agent | `src/agents/retrieverAgent.js` | ✅ 已实现 | 检索长期记忆并聚合上下文 |
 | Plan Agent | `src/agents/planAgent.js` | ✅ 已实现 | 生成 steps/risks/rollbackPlan |
@@ -29,7 +29,7 @@
 
 ## 3. 测试与验证状态
 
-- 单元测试：`src/**/*.test.js`（当前 13 个测试均通过，覆盖 orchestrator/memory/modifier/llm 与文件系统集成场景）。
+- 单元+集成测试：`src/**/*.test.js`（当前 17 个测试均通过，覆盖 orchestrator/memory/modifier/llm、文件系统集成、以及真实模块编排修复链路）。
 - 语法校验：主流程核心文件 `node --check`（通过）。
 
 ## 4. 下一步建议
