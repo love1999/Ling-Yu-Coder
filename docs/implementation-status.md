@@ -29,12 +29,12 @@
 
 ## 3. 测试与验证状态
 
-- 单元+集成测试：`src/**/*.test.js`（当前 21 个测试均通过，覆盖 orchestrator/memory/modifier/llm（含熔断）、文件系统集成、patch merge、以及真实模块编排修复链路）。
+- 单元+集成测试：`src/**/*.test.js`（当前 25 个测试均通过，覆盖 orchestrator/memory/modifier/llm（含熔断）、文件系统集成、patch merge、真实模块编排修复链路、以及主进程 IPC 处理器）。
 - 语法校验：主流程核心文件 `node --check`（通过）。
 
 ## 4. 下一步建议
 
 1. 为 patch-level 合并增加 AST/语法感知能力（当前为行级三方合并）。
 2. 引入端到端 UI 自动化测试（Playwright/Electron E2E）。
-3. 增加主进程 IPC 层集成测试（Electron 环境）。
+3. 增加 Electron 真进程级 IPC E2E（当前已完成 handler 级集成测试）。
 4. 增加 LLM provider 熔断状态可观测指标（告警/仪表盘）。
