@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'node:path';
 
 import { registerIpcHandlers } from './src/core/ipcHandlers.js';
+import { LLMManager } from './src/agents/llmManager.js';
 
 const createWindow = async () => {
   const win = new BrowserWindow({
@@ -25,6 +26,7 @@ const createWindow = async () => {
 registerIpcHandlers({
   ipcMain,
   app,
+  llmManager: new LLMManager(),
   dialog: {
     ...dialog,
     showMessageBox: async (opts) => {

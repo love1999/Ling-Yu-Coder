@@ -29,10 +29,11 @@
 
 ## 3. 测试与验证状态
 
-- 单元+集成测试：`src/**/*.test.js`（当前 28 个测试均通过，覆盖 orchestrator/memory/modifier/llm（含熔断+指标）、文件系统集成、patch merge（含 `patch-ast` 语法守卫）、真实模块编排修复链路、以及主进程 IPC 处理器）。
-- E2E：`e2e/electron.e2e.test.js`（基于 Playwright Electron；当前环境无 Playwright 时自动 skip）。新增 **真实 Electron 进程级 IPC 桥接 E2E**，覆盖 `inspectEnvironment/loadMemory/saveMemory/runSnippet/requestApproval` 全链路。
+- 单元+集成测试：`src/**/*.test.js`（当前 30 个测试均通过，覆盖 orchestrator/memory/modifier/llm（含熔断+指标）、文件系统集成、patch merge（含 `patch-ast` 语法守卫）、真实模块编排修复链路、以及主进程 IPC 处理器）。
+- E2E：`e2e/electron.e2e.test.js`（基于 Playwright Electron；当前环境无 Playwright 时自动 skip）。新增 **真实 Electron 进程级 IPC 桥接 E2E**，覆盖 `inspectEnvironment/loadMemory/saveMemory/runSnippet/requestApproval`，并补充 `getLLMHealth/probeLLMProviders` 验证。
 - 语法校验：主流程核心文件 `node --check`（通过）。
 - CI：新增 `.github/workflows/ci.yml`，在 Ubuntu 上自动执行 `npm test` + Playwright Chromium 安装 + `xvfb-run npm run test:e2e`。
+- IPC 扩展：新增 `llm:health` / `llm:probe`，用于输出 provider 状态、active provider 与熔断健康指标。
 
 ## 4. 下一步建议
 

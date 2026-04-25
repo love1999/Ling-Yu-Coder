@@ -6,7 +6,7 @@ import path from 'node:path';
 
 import { registerIpcHandlers } from './ipcHandlers.js';
 
-const createIpcHarness = (paths = {}) => {
+const createIpcHarness = (paths = {}, overrides = {}) => {
   const handlers = new Map();
   const ipcMain = {
     handle: (name, fn) => handlers.set(name, fn)
@@ -21,7 +21,37 @@ const createIpcHarness = (paths = {}) => {
     showMessageBox: async () => ({ response: 1 })
   };
 
-  registerIpcHandlers({ ipcMain, app, dialog });
+  const llmManager = overrides.llmManager || {
+    active: 'online',
+    listProviders: () => ({
+      online: { healthy: true, state: 'healthy' },
+      local: { healthy: true, state: 'healthy' }
+    }),
+    getHealthMetrics: () => ({
+      totalProbes: 0,
+      successfulProbes: 0,
+      failedProbes: 0,
+      openedCircuits: 0,
+      recoveredCircuits: 0,
+      probeSuccessRate: 1
+    }),
+    probeAllProviders: async () => ({
+      providers: {
+        online: { healthy: true, state: 'healthy' },
+        local: { healthy: true, state: 'healthy' }
+      },
+      metrics: {
+        totalProbes: 2,
+        successfulProbes: 2,
+        failedProbes: 0,
+        openedCircuits: 0,
+        recoveredCircuits: 0,
+        probeSuccessRate: 1
+      }
+    })
+  };
+
+  registerIpcHandlers({ ipcMain, app, dialog, llmManager });
 
   const invoke = async (name, payload) => handlers.get(name)({}, payload);
 
@@ -69,4 +99,25 @@ test('ipcHandlers: codebase modify uses default documents root', async () => {
   assert.equal(result.ok, true);
   const content = await fs.readFile(path.join(root, 'a.txt'), 'utf8');
   assert.equal(content, 'hello');
+});
+
+test('ipcHandlers: llm health returns provider and metrics snapshot', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lingyu-ipc-'));
+  const harness = createIpcHarness({ userData: root, documents: root });
+
+  const result = await harness.invoke('llm:health');
+  assert.equal(result.ok, true);
+  assert.equal(result.active, 'online');
+  assert.equal(result.providers.online.state, 'healthy');
+  assert.equal(result.metrics.probeSuccessRate, 1);
+});
+
+test('ipcHandlers: llm probe runs and returns report', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lingyu-ipc-'));
+  const harness = createIpcHarness({ userData: root, documents: root });
+
+  const result = await harness.invoke('llm:probe');
+  assert.equal(result.ok, true);
+  assert.equal(result.providers.local.healthy, true);
+  assert.equal(result.metrics.totalProbes, 2);
 });

@@ -84,6 +84,15 @@ test('electron e2e: preload IPC bridge works in real process', async (t) => {
 
     const approved = await page.evaluate(() => window.lingYuAPI.requestApproval('E2E approval'));
     assert.equal(approved, true);
+
+    const health = await page.evaluate(() => window.lingYuAPI.getLLMHealth());
+    assert.equal(health.ok, true);
+    assert.equal(typeof health.active, 'string');
+    assert.ok(health.providers.online);
+
+    const probe = await page.evaluate(() => window.lingYuAPI.probeLLMProviders());
+    assert.equal(probe.ok, true);
+    assert.ok(probe.metrics.totalProbes >= 1);
   } finally {
     await app.close();
   }

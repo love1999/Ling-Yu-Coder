@@ -6,7 +6,7 @@ import { applyCodebaseChanges } from './applyCodebaseChanges.js';
 
 const MEMORY_FILE = 'memory.json';
 
-export const registerIpcHandlers = ({ ipcMain, app, dialog }) => {
+export const registerIpcHandlers = ({ ipcMain, app, dialog, llmManager = null }) => {
   const getMemoryPath = () => path.join(app.getPath('userData'), MEMORY_FILE);
 
   ipcMain.handle('environment:inspect', () => ({
@@ -67,5 +67,37 @@ export const registerIpcHandlers = ({ ipcMain, app, dialog }) => {
   ipcMain.handle('codebase:modify', async (_evt, { root, changes, options = {} }) => {
     const targetRoot = root || app.getPath('documents');
     return applyCodebaseChanges({ root: targetRoot, changes, options });
+  });
+
+  ipcMain.handle('llm:health', async () => {
+    if (!llmManager) {
+      return {
+        ok: false,
+        reason: 'llm manager not configured'
+      };
+    }
+
+    return {
+      ok: true,
+      active: llmManager.active,
+      providers: llmManager.listProviders(),
+      metrics: llmManager.getHealthMetrics()
+    };
+  });
+
+  ipcMain.handle('llm:probe', async () => {
+    if (!llmManager) {
+      return {
+        ok: false,
+        reason: 'llm manager not configured'
+      };
+    }
+
+    const report = await llmManager.probeAllProviders();
+    return {
+      ok: true,
+      active: llmManager.active,
+      ...report
+    };
   });
 };

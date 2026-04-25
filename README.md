@@ -16,6 +16,7 @@
 - ✅ Codebase Modifier（多文件协调）：批量写入目标文件。
 - ✅ Documentation Writer：生成任务执行文档。
 - ✅ LLM Manage（支持在线+本地）：可在在线/本地 provider 间切换。
+- ✅ LLM 健康 IPC：主进程已提供 `llm:health` / `llm:probe`，可用于 UI 仪表盘拉取 provider 状态与熔断指标。
 
 ## 模块调度协议与标准规范
 
