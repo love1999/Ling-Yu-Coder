@@ -1,0 +1,565 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - work
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
+
+jobs:
+  test-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run unit + integration tests
+        run: npm test
+
+      - name: Install Playwright (Chromium)
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Electron E2E smoke tests
+        run: xvfb-run -a npm run test:e2e:smoke
+
+  test-nightly-matrix:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      FLAKE_GATE_SILENT_WINDOW_UTC: ${{ vars.FLAKE_GATE_SILENT_WINDOW_UTC != '' && vars.FLAKE_GATE_SILENT_WINDOW_UTC || '00:00-00:00' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [smoke, full]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright (Chromium)
+        run: npx playwright install --with-deps chromium
+
+      - name: Restore flake history cache
+        if: matrix.suite == 'full'
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci/flake-history.json
+          key: flake-history-${{ github.run_id }}
+          restore-keys: |
+            flake-history-
+
+      - name: Run Electron E2E suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          if [ "${{ matrix.suite }}" = "full" ]; then
+            : > "reports/quarantine-full.txt"
+            set +e
+            xvfb-run -a npm run test:e2e:full | tee "reports/e2e-full.log"
+            first_rc=$?
+            set -e
+
+            if [ "${first_rc}" -ne 0 ]; then
+              grep -E '^not ok [0-9]+ - ' "reports/e2e-full.log" | sed -E 's/^not ok [0-9]+ - //' > "reports/quarantine-full.txt" || true
+              if [ -s "reports/quarantine-full.txt" ]; then
+                pattern=""
+                while IFS= read -r failed_name; do
+                  escaped="$(printf '%s' "${failed_name}" | sed -e 's/[.[\*^$()+?{}|\\]/\\&/g')"
+                  if [ -z "${pattern}" ]; then
+                    pattern="${escaped}"
+                  else
+                    pattern="${pattern}|${escaped}"
+                  fi
+                done < "reports/quarantine-full.txt"
+
+                echo "Quarantine rerun pattern: ${pattern}" | tee "reports/quarantine-rerun.log"
+                xvfb-run -a node --test --test-name-pattern="${pattern}" e2e/**/*.test.js | tee -a "reports/quarantine-rerun.log"
+              fi
+            fi
+
+            node - <<'NODE'
+            const fs = require('node:fs');
+            const path = require('node:path');
+
+            const histPath = path.join('.ci', 'flake-history.json');
+            const quarantinePath = path.join('reports', 'quarantine-full.txt');
+            const outPath = path.join('reports', 'flake-history.json');
+            const WINDOW_DAYS = 30;
+            const DECAY_PER_DAY = 0.9;
+            const silentWindow = process.env.FLAKE_GATE_SILENT_WINDOW_UTC || '00:00-00:00';
+
+            const toMinutes = (hhmm) => {
+              const [h, m] = String(hhmm || '').split(':').map((v) => Number(v));
+              if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+              return (h * 60) + m;
+            };
+            const isInWindow = (() => {
+              const [startRaw, endRaw] = silentWindow.split('-');
+              const start = toMinutes(startRaw);
+              const end = toMinutes(endRaw);
+              if (start === null || end === null || start === end) return false;
+              const now = new Date();
+              const nowMin = (now.getUTCHours() * 60) + now.getUTCMinutes();
+              if (start < end) return nowMin >= start && nowMin < end;
+              return nowMin >= start || nowMin < end;
+            })();
+
+            const prev = fs.existsSync(histPath)
+              ? JSON.parse(fs.readFileSync(histPath, 'utf8'))
+              : { byTest: {}, runs: 0, lastUpdated: null, gateRuns: 0, silentWindowHits: 0 };
+
+            const failed = fs.existsSync(quarantinePath)
+              ? fs.readFileSync(quarantinePath, 'utf8').split('\n').map((s) => s.trim()).filter(Boolean)
+              : [];
+
+            const next = { ...prev, byTest: { ...(prev.byTest || {}) } };
+            const now = new Date();
+            const nowIso = now.toISOString();
+            const branch = process.env.GITHUB_REF_NAME || 'unknown';
+
+            for (const [name, item] of Object.entries(next.byTest)) {
+              const last = item.lastSeen ? new Date(item.lastSeen) : now;
+              const days = Math.max(0, Math.floor((now - last) / (1000 * 60 * 60 * 24)));
+
+              if (days > WINDOW_DAYS) {
+                delete next.byTest[name];
+                continue;
+              }
+
+              const prevScore = typeof item.score === 'number' ? item.score : (item.failures || 0);
+              const decayedScore = prevScore * (DECAY_PER_DAY ** days);
+              next.byTest[name] = {
+                ...item,
+                score: Number(decayedScore.toFixed(4))
+              };
+            }
+
+            next.runs = (next.runs || 0) + 1;
+            next.gateRuns = (next.gateRuns || 0) + 1;
+            next.silentWindowHits = (next.silentWindowHits || 0) + (isInWindow ? 1 : 0);
+            next.lastUpdated = nowIso;
+            next.windowDays = WINDOW_DAYS;
+            next.decayPerDay = DECAY_PER_DAY;
+            next.silentWindowUtc = silentWindow;
+            next.silentWindowHitRate = next.gateRuns > 0
+              ? Number((next.silentWindowHits / next.gateRuns).toFixed(4))
+              : 0;
+
+            next.byBranch = { ...(next.byBranch || {}) };
+            const prevBranch = next.byBranch[branch] || { gateRuns: 0, silentWindowHits: 0, lastUpdated: null };
+            next.byBranch[branch] = {
+              gateRuns: prevBranch.gateRuns + 1,
+              silentWindowHits: prevBranch.silentWindowHits + (isInWindow ? 1 : 0),
+              hitRate: Number(((prevBranch.silentWindowHits + (isInWindow ? 1 : 0)) / (prevBranch.gateRuns + 1)).toFixed(4)),
+              lastUpdated: nowIso
+            };
+
+            for (const name of failed) {
+              const prevItem = next.byTest[name] || { failures: 0, lastSeen: null, score: 0 };
+              next.byTest[name] = {
+                failures: prevItem.failures + 1,
+                score: Number(((prevItem.score || 0) + 1).toFixed(4)),
+                lastSeen: next.lastUpdated
+              };
+            }
+
+            const maxScore = Object.values(next.byTest || {}).reduce((m, item) => Math.max(m, Number(item.score || 0)), 0);
+            const history = Array.isArray(next.history) ? next.history.slice(-59) : [];
+            history.push({
+              ts: nowIso,
+              branch,
+              maxScore: Number(maxScore.toFixed(4)),
+              silentWindow: isInWindow
+            });
+            next.history = history;
+
+            fs.mkdirSync('.ci', { recursive: true });
+            fs.writeFileSync(histPath, JSON.stringify(next, null, 2));
+            fs.writeFileSync(outPath, JSON.stringify(next, null, 2));
+            NODE
+
+            if [ "${first_rc}" -ne 0 ]; then
+              exit "${first_rc}"
+            fi
+          else
+            xvfb-run -a npm run test:e2e:smoke | tee "reports/e2e-smoke.log"
+          fi
+
+      - name: Save flake history cache
+        if: always() && matrix.suite == 'full'
+        uses: actions/cache/save@v4
+        with:
+          path: .ci/flake-history.json
+          key: flake-history-${{ github.run_id }}
+
+      - name: Upload E2E logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs-${{ matrix.suite }}
+          path: reports/*
+
+  e2e-report:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: test-nightly-matrix
+    runs-on: ubuntu-latest
+    env:
+      FLAKE_WARN_THRESHOLD: ${{ vars.FLAKE_WARN_THRESHOLD != '' && vars.FLAKE_WARN_THRESHOLD || (github.ref_name == 'main' && '3' || '5') }}
+      FLAKE_BLOCK_THRESHOLD: ${{ vars.FLAKE_BLOCK_THRESHOLD != '' && vars.FLAKE_BLOCK_THRESHOLD || (github.ref_name == 'main' && '8' || '13') }}
+      FLAKE_GATE_SILENT_WINDOW_UTC: ${{ vars.FLAKE_GATE_SILENT_WINDOW_UTC != '' && vars.FLAKE_GATE_SILENT_WINDOW_UTC || '00:00-00:00' }}
+      FLAKE_GATE_WARN_ONLY: ${{ vars.FLAKE_GATE_WARN_ONLY != '' && vars.FLAKE_GATE_WARN_ONLY || 'false' }}
+      PROMETHEUS_PUSHGATEWAY_URL: ${{ vars.PROMETHEUS_PUSHGATEWAY_URL }}
+      PROMETHEUS_PUSHGATEWAY_JOB: ${{ vars.PROMETHEUS_PUSHGATEWAY_JOB != '' && vars.PROMETHEUS_PUSHGATEWAY_JOB || 'lingyu_flake_gate' }}
+      FLAKE_ALERT_WEBHOOK_WARN: ${{ secrets.FLAKE_ALERT_WEBHOOK_WARN }}
+      FLAKE_ALERT_WEBHOOK_BLOCK: ${{ secrets.FLAKE_ALERT_WEBHOOK_BLOCK }}
+      FLAKE_SLO_BURNRATE_WARN: ${{ vars.FLAKE_SLO_BURNRATE_WARN != '' && vars.FLAKE_SLO_BURNRATE_WARN || '1.5' }}
+      FLAKE_SLO_BURNRATE_PAGE: ${{ vars.FLAKE_SLO_BURNRATE_PAGE != '' && vars.FLAKE_SLO_BURNRATE_PAGE || '2.0' }}
+      FLAKE_SLO_BURNRATE_ESCALATE: ${{ vars.FLAKE_SLO_BURNRATE_ESCALATE != '' && vars.FLAKE_SLO_BURNRATE_ESCALATE || '4.0' }}
+      ONCALL_WEBHOOK_PRIMARY: ${{ secrets.ONCALL_WEBHOOK_PRIMARY }}
+      ONCALL_WEBHOOK_SECONDARY: ${{ secrets.ONCALL_WEBHOOK_SECONDARY }}
+    steps:
+      - name: Download E2E logs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: e2e-logs-*
+          merge-multiple: true
+          path: reports
+
+      - name: Build E2E summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "## E2E Matrix Summary" >> "$GITHUB_STEP_SUMMARY"
+          for file in reports/*.log; do
+            suite="$(basename "$file" .log)"
+            pass="$(grep -E '^# pass ' "$file" | awk '{print $3}' || echo 0)"
+            fail="$(grep -E '^# fail ' "$file" | awk '{print $3}' || echo 0)"
+            skipped="$(grep -E '^# skipped ' "$file" | awk '{print $3}' || echo 0)"
+            echo "- ${suite}: pass=${pass}, fail=${fail}, skipped=${skipped}" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          if [ -f reports/flake-history.json ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "## Flake Trend (Top 5)" >> "$GITHUB_STEP_SUMMARY"
+            node - <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+            const fs = require('node:fs');
+            const data = JSON.parse(fs.readFileSync('reports/flake-history.json', 'utf8'));
+            const items = Object.entries(data.byTest || {})
+              .sort((a, b) => (b[1].score || 0) - (a[1].score || 0))
+              .slice(0, 5);
+            if (items.length === 0) {
+              console.log('- no flaky test recorded yet');
+            } else {
+              for (const [name, info] of items) {
+                console.log(`- ${name}: score=${info.score}, failures=${info.failures}, lastSeen=${info.lastSeen}`);
+              }
+            }
+            const gateRuns = Number(data.gateRuns || 0);
+            const hits = Number(data.silentWindowHits || 0);
+            const rate = gateRuns > 0 ? (hits / gateRuns).toFixed(4) : '0.0000';
+            console.log(`- silentWindowUtc=${data.silentWindowUtc || 'n/a'}, silentWindowHits=${hits}, gateRuns=${gateRuns}, hitRate=${rate}`);
+
+            const branches = Object.entries(data.byBranch || {})
+              .sort((a, b) => (b[1].gateRuns || 0) - (a[1].gateRuns || 0));
+            console.log('');
+            console.log('## Flake Branch Panel');
+            if (branches.length === 0) {
+              console.log('- no branch stats yet');
+            } else {
+              for (const [name, info] of branches) {
+                console.log(`- ${name}: gateRuns=${info.gateRuns}, silentWindowHits=${info.silentWindowHits}, hitRate=${info.hitRate}`);
+              }
+            }
+
+            const timeline = Array.isArray(data.history) ? data.history.slice(-10) : [];
+            console.log('');
+            console.log('## Flake Timeline (latest 10)');
+            if (timeline.length === 0) {
+              console.log('- no timeline yet');
+            } else {
+              for (const item of timeline) {
+                console.log(`- ${item.ts} | branch=${item.branch} | maxScore=${item.maxScore} | silentWindow=${item.silentWindow}`);
+              }
+            }
+            NODE
+          fi
+
+      - name: Enforce flake alert gate
+        id: flake_gate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f reports/flake-history.json ]; then
+            echo "No flake history file, skip gate."
+            cat > reports/flake-gate-result.json <<'JSON'
+            {"status":"skip","maxScore":0,"warn":0,"block":0,"warnOnly":false}
+            JSON
+            exit 0
+          fi
+
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const data = JSON.parse(fs.readFileSync('reports/flake-history.json', 'utf8'));
+          const entries = Object.entries(data.byTest || {});
+          const maxScore = entries.reduce((m, [, info]) => Math.max(m, Number(info.score || 0)), 0);
+          const warn = Number(process.env.FLAKE_WARN_THRESHOLD || 3);
+          const block = Number(process.env.FLAKE_BLOCK_THRESHOLD || 8);
+          const forceWarnOnly = String(process.env.FLAKE_GATE_WARN_ONLY || 'false').toLowerCase() === 'true';
+          const window = process.env.FLAKE_GATE_SILENT_WINDOW_UTC || '00:00-00:00';
+
+          const toMinutes = (hhmm) => {
+            const [h, m] = String(hhmm || '').split(':').map((v) => Number(v));
+            if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+            return (h * 60) + m;
+          };
+
+          const inSilentWindow = (() => {
+            const [startRaw, endRaw] = window.split('-');
+            const start = toMinutes(startRaw);
+            const end = toMinutes(endRaw);
+            if (start === null || end === null || start === end) return false;
+            const now = new Date();
+            const nowMin = (now.getUTCHours() * 60) + now.getUTCMinutes();
+            if (start < end) return nowMin >= start && nowMin < end;
+            return nowMin >= start || nowMin < end;
+          })();
+
+          const warnOnlyMode = forceWarnOnly || inSilentWindow;
+          if (warnOnlyMode) {
+            console.log(`::warning::Flake gate running in warn-only mode (force=${forceWarnOnly}, window=${window}, inWindow=${inSilentWindow})`);
+          }
+
+          let status = 'pass';
+          if (!warnOnlyMode && maxScore >= block) {
+            status = 'block';
+            console.error(`Flake gate BLOCKED: maxScore=${maxScore} >= block=${block}`);
+          } else if (maxScore >= warn) {
+            status = 'warn';
+            console.log(`::warning::Flake gate warning: maxScore=${maxScore} >= warn=${warn}`);
+          } else {
+            console.log(`Flake gate passed: maxScore=${maxScore}, warn=${warn}, block=${block}`);
+          }
+
+          const report = {
+            status,
+            maxScore,
+            warn,
+            block,
+            warnOnly: warnOnlyMode,
+            generatedAt: new Date().toISOString(),
+            branch: process.env.GITHUB_REF_NAME || 'unknown'
+          };
+          fs.writeFileSync('reports/flake-gate-result.json', JSON.stringify(report, null, 2));
+          NODE
+
+      - name: Export flake metrics (Prometheus format)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f reports/flake-history.json ]; then
+            echo "No flake history, skip metrics export."
+            exit 0
+          fi
+
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const data = JSON.parse(fs.readFileSync('reports/flake-history.json', 'utf8'));
+          const gate = fs.existsSync('reports/flake-gate-result.json')
+            ? JSON.parse(fs.readFileSync('reports/flake-gate-result.json', 'utf8'))
+            : { status: 'skip', maxScore: 0, warn: 0, block: 0, warnOnly: false };
+          const lines = [];
+          lines.push('# HELP lingyu_flake_gate_max_score Maximum flake score in current run');
+          lines.push('# TYPE lingyu_flake_gate_max_score gauge');
+          lines.push(`lingyu_flake_gate_max_score ${Number(gate.maxScore || 0)}`);
+          lines.push('# HELP lingyu_flake_gate_warn_threshold Configured flake warning threshold');
+          lines.push('# TYPE lingyu_flake_gate_warn_threshold gauge');
+          lines.push(`lingyu_flake_gate_warn_threshold ${Number(gate.warn || 0)}`);
+          lines.push('# HELP lingyu_flake_gate_block_threshold Configured flake block threshold');
+          lines.push('# TYPE lingyu_flake_gate_block_threshold gauge');
+          lines.push(`lingyu_flake_gate_block_threshold ${Number(gate.block || 0)}`);
+          lines.push('# HELP lingyu_flake_gate_warn_only Whether flake gate is in warn-only mode');
+          lines.push('# TYPE lingyu_flake_gate_warn_only gauge');
+          lines.push(`lingyu_flake_gate_warn_only ${gate.warnOnly ? 1 : 0}`);
+          lines.push('# HELP lingyu_flake_silent_window_hit_rate Silent-window hit rate in historical runs');
+          lines.push('# TYPE lingyu_flake_silent_window_hit_rate gauge');
+          lines.push(`lingyu_flake_silent_window_hit_rate ${Number(data.silentWindowHitRate || 0)}`);
+          lines.push('# HELP lingyu_flake_branch_gate_runs Total gate runs by branch');
+          lines.push('# TYPE lingyu_flake_branch_gate_runs gauge');
+          for (const [branch, info] of Object.entries(data.byBranch || {})) {
+            lines.push(`lingyu_flake_branch_gate_runs{branch="${branch}"} ${Number(info.gateRuns || 0)}`);
+            lines.push(`lingyu_flake_branch_hit_rate{branch="${branch}"} ${Number(info.hitRate || 0)}`);
+          }
+          fs.writeFileSync('reports/flake-metrics.prom', `${lines.join('\n')}\n`);
+          NODE
+
+          {
+            echo ""
+            echo "## Flake Metrics Export"
+            echo "- Prometheus metrics generated: \`reports/flake-metrics.prom\`"
+            if [ -n "${PROMETHEUS_PUSHGATEWAY_URL}" ]; then
+              echo "- Pushgateway target: ${PROMETHEUS_PUSHGATEWAY_URL} (job=${PROMETHEUS_PUSHGATEWAY_JOB})"
+            else
+              echo "- Pushgateway target not configured (set repo var \`PROMETHEUS_PUSHGATEWAY_URL\`)."
+            fi
+            echo "- Grafana 可直接基于 \`lingyu_flake_*\` 指标建面板并配置告警规则。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Compute flake SLO burn-rate baseline
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f reports/flake-history.json ] || [ ! -f reports/flake-gate-result.json ]; then
+            echo '{"ok":false,"reason":"missing flake reports"}' > reports/flake-slo-report.json
+            exit 0
+          fi
+
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const history = JSON.parse(fs.readFileSync('reports/flake-history.json', 'utf8'));
+          const gate = JSON.parse(fs.readFileSync('reports/flake-gate-result.json', 'utf8'));
+          const warnThreshold = Number(gate.warn || process.env.FLAKE_WARN_THRESHOLD || 3);
+          const runs = Array.isArray(history.history) ? history.history : [];
+          const latest30 = runs.slice(-30);
+          const latest7 = runs.slice(-7);
+          const countBreaches = (items) => items.filter((item) => Number(item.maxScore || 0) >= warnThreshold).length;
+          const breach7 = countBreaches(latest7);
+          const breach30 = countBreaches(latest30);
+          const rate7 = latest7.length > 0 ? breach7 / latest7.length : 0;
+          const rate30 = latest30.length > 0 ? breach30 / latest30.length : 0;
+          const burnRate = rate30 > 0 ? rate7 / rate30 : (rate7 > 0 ? rate7 : 0);
+          const pageThreshold = Number(process.env.FLAKE_SLO_BURNRATE_PAGE || 2);
+          const escalateThreshold = Number(process.env.FLAKE_SLO_BURNRATE_ESCALATE || 4);
+          const level = burnRate >= escalateThreshold ? 'secondary' : (burnRate >= pageThreshold ? 'primary' : 'none');
+
+          const report = {
+            ok: true,
+            generatedAt: new Date().toISOString(),
+            warnThreshold,
+            windows: {
+              short: { size: latest7.length, breaches: breach7, breachRate: Number(rate7.toFixed(4)) },
+              long: { size: latest30.length, breaches: breach30, breachRate: Number(rate30.toFixed(4)) }
+            },
+            burnRate: Number(burnRate.toFixed(4)),
+            thresholds: {
+              warn: Number(process.env.FLAKE_SLO_BURNRATE_WARN || 1.5),
+              page: pageThreshold,
+              escalate: escalateThreshold
+            },
+            escalationLevel: level
+          };
+          fs.writeFileSync('reports/flake-slo-report.json', JSON.stringify(report, null, 2));
+          NODE
+
+          node - <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+          const fs = require('node:fs');
+          const data = JSON.parse(fs.readFileSync('reports/flake-slo-report.json', 'utf8'));
+          if (!data.ok) {
+            console.log('\n## Flake SLO Burn-rate');
+            console.log(`- unavailable: ${data.reason}`);
+            process.exit(0);
+          }
+          console.log('\n## Flake SLO Burn-rate');
+          console.log(`- burnRate=${data.burnRate}, escalationLevel=${data.escalationLevel}`);
+          console.log(`- shortWindow=${data.windows.short.size} runs, breachRate=${data.windows.short.breachRate}`);
+          console.log(`- longWindow=${data.windows.long.size} runs, breachRate=${data.windows.long.breachRate}`);
+          NODE
+
+      - name: Push flake metrics to Pushgateway
+        if: always() && env.PROMETHEUS_PUSHGATEWAY_URL != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f reports/flake-metrics.prom ]; then
+            echo "No metrics file found, skip pushgateway."
+            exit 0
+          fi
+          curl --fail --show-error --silent \
+            --data-binary @reports/flake-metrics.prom \
+            "${PROMETHEUS_PUSHGATEWAY_URL%/}/metrics/job/${PROMETHEUS_PUSHGATEWAY_JOB}"
+
+      - name: Route flake alerts by severity
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f reports/flake-gate-result.json ]; then
+            echo "No gate result found, skip route."
+            exit 0
+          fi
+          status="$(node -p "require('./reports/flake-gate-result.json').status")"
+          if [ "${status}" = "warn" ] && [ -n "${FLAKE_ALERT_WEBHOOK_WARN}" ]; then
+            curl --fail --show-error --silent -X POST "${FLAKE_ALERT_WEBHOOK_WARN}" \
+              -H 'content-type: application/json' \
+              --data-binary @reports/flake-gate-result.json
+            echo "Warn alert routed."
+          elif [ "${status}" = "block" ] && [ -n "${FLAKE_ALERT_WEBHOOK_BLOCK}" ]; then
+            curl --fail --show-error --silent -X POST "${FLAKE_ALERT_WEBHOOK_BLOCK}" \
+              -H 'content-type: application/json' \
+              --data-binary @reports/flake-gate-result.json
+            echo "Block alert routed."
+          else
+            echo "No matching route for status=${status} or route webhook missing."
+          fi
+
+      - name: Trigger on-call escalation from SLO burn-rate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f reports/flake-slo-report.json ]; then
+            echo "No slo report found, skip escalation."
+            exit 0
+          fi
+          level="$(node -p "require('./reports/flake-slo-report.json').escalationLevel || 'none'")"
+          if [ "${level}" = "secondary" ] && [ -n "${ONCALL_WEBHOOK_SECONDARY}" ]; then
+            curl --fail --show-error --silent -X POST "${ONCALL_WEBHOOK_SECONDARY}" \
+              -H 'content-type: application/json' \
+              --data-binary @reports/flake-slo-report.json
+            echo "Secondary on-call escalated."
+          elif [ "${level}" = "primary" ] && [ -n "${ONCALL_WEBHOOK_PRIMARY}" ]; then
+            curl --fail --show-error --silent -X POST "${ONCALL_WEBHOOK_PRIMARY}" \
+              -H 'content-type: application/json' \
+              --data-binary @reports/flake-slo-report.json
+            echo "Primary on-call paged."
+          else
+            echo "No escalation sent (level=${level})."
+          fi
+
+      - name: Fail nightly when flake gate is blocked
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f reports/flake-gate-result.json ]; then
+            exit 0
+          fi
+          status="$(node -p "require('./reports/flake-gate-result.json').status")"
+          if [ "${status}" = "block" ]; then
+            echo "Flake gate blocked nightly run."
+            exit 1
+          fi
