@@ -43,6 +43,40 @@ test('electron e2e: run pipeline and generate doc', async (t) => {
   }
 });
 
+test('electron e2e: approval denied path is handled', async (t) => {
+  if (!(await hasPlaywright())) {
+    t.skip('playwright not installed in current environment');
+    return;
+  }
+
+  const { _electron: electron } = await import('playwright');
+
+  const app = await electron.launch({
+    args: ['.'],
+    env: {
+      ...process.env,
+      LINGYU_E2E: '1',
+      LINGYU_E2E_APPROVAL: '0'
+    }
+  });
+
+  try {
+    const page = await app.firstWindow();
+    await page.waitForSelector('#runPipeline');
+    await page.click('#runPipeline');
+
+    await page.waitForFunction(() => {
+      const text = document.querySelector('#doc')?.textContent || '';
+      return text.includes('审批未通过');
+    });
+
+    const doc = await page.textContent('#doc');
+    assert.match(doc || '', /审批未通过/);
+  } finally {
+    await app.close();
+  }
+});
+
 test('electron e2e: preload IPC bridge works in real process', async (t) => {
   if (!(await hasPlaywright())) {
     t.skip('playwright not installed in current environment');

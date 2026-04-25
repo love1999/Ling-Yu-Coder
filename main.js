@@ -31,7 +31,8 @@ registerIpcHandlers({
     ...dialog,
     showMessageBox: async (opts) => {
       if (process.env.LINGYU_E2E === '1') {
-        return { response: 1 };
+        const e2eResponse = process.env.LINGYU_E2E_APPROVAL === '0' ? 0 : 1;
+        return { response: e2eResponse };
       }
       return dialog.showMessageBox(opts);
     }
