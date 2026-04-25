@@ -9,6 +9,8 @@
     "dev": "electron .",
     "test": "node --test src/**/*.test.js",
     "test:e2e": "node --test e2e/**/*.test.js",
+    "test:e2e:smoke": "node --test --test-name-pattern='\\[smoke\\]' e2e/**/*.test.js",
+    "test:e2e:full": "node --test --test-name-pattern='\\[(smoke|full)\\]' e2e/**/*.test.js",
     "test:all": "npm test && npm run test:e2e"
   },
   "dependencies": {

@@ -40,11 +40,13 @@ npm install
 npm run start
 npm test
 npm run test:e2e
+npm run test:e2e:smoke
+npm run test:e2e:full
 ```
 
 > `npm run test:e2e` 当前包含三类 Electron E2E：UI 主流程（点击运行并生成文档）、审批拒绝分支验证，以及预加载 `lingYuAPI` 的真实进程级 IPC 桥接验证（环境检测/记忆读写/运行沙箱含超时分支/审批门禁/LLM 健康探测/代码修改冲突分支）。
 
-项目已提供 GitHub Actions CI（`.github/workflows/ci.yml`）：自动运行 `npm test`，并在 Ubuntu 下安装 Playwright Chromium 后通过 `xvfb-run` 执行 Electron E2E。
+项目已提供 GitHub Actions CI（`.github/workflows/ci.yml`）：`push/PR` 执行 `npm test + E2E smoke`；`schedule/workflow_dispatch` 执行 `E2E full`（失败自动重试一次）。
 
 ## 项目结构
 

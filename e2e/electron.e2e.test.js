@@ -16,7 +16,7 @@ const hasPlaywright = async () => {
 
 const sha1 = (content) => createHash('sha1').update(content || '').digest('hex');
 
-test('electron e2e: run pipeline and generate doc', async (t) => {
+test('[smoke] electron e2e: run pipeline and generate doc', async (t) => {
   if (!(await hasPlaywright())) {
     t.skip('playwright not installed in current environment');
     return;
@@ -49,7 +49,7 @@ test('electron e2e: run pipeline and generate doc', async (t) => {
   }
 });
 
-test('electron e2e: approval denied path is handled', async (t) => {
+test('[smoke] electron e2e: approval denied path is handled', async (t) => {
   if (!(await hasPlaywright())) {
     t.skip('playwright not installed in current environment');
     return;
@@ -83,7 +83,7 @@ test('electron e2e: approval denied path is handled', async (t) => {
   }
 });
 
-test('electron e2e: preload IPC bridge works in real process', async (t) => {
+test('[full] electron e2e: preload IPC bridge works in real process', async (t) => {
   if (!(await hasPlaywright())) {
     t.skip('playwright not installed in current environment');
     return;
