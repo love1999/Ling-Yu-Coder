@@ -102,6 +102,8 @@ jobs:
               const histPath = path.join('.ci', 'flake-history.json');
               const quarantinePath = path.join('reports', 'quarantine-full.txt');
               const outPath = path.join('reports', 'flake-history.json');
+              const WINDOW_DAYS = 30;
+              const DECAY_PER_DAY = 0.9;
 
               const prev = fs.existsSync(histPath)
                 ? JSON.parse(fs.readFileSync(histPath, 'utf8'))
@@ -112,13 +114,36 @@ jobs:
                 : [];
 
               const next = { ...prev, byTest: { ...(prev.byTest || {}) } };
+              const now = new Date();
+              const nowIso = now.toISOString();
+
+              for (const [name, item] of Object.entries(next.byTest)) {
+                const last = item.lastSeen ? new Date(item.lastSeen) : now;
+                const days = Math.max(0, Math.floor((now - last) / (1000 * 60 * 60 * 24)));
+
+                if (days > WINDOW_DAYS) {
+                  delete next.byTest[name];
+                  continue;
+                }
+
+                const prevScore = typeof item.score === 'number' ? item.score : (item.failures || 0);
+                const decayedScore = prevScore * (DECAY_PER_DAY ** days);
+                next.byTest[name] = {
+                  ...item,
+                  score: Number(decayedScore.toFixed(4))
+                };
+              }
+
               next.runs = (next.runs || 0) + 1;
-              next.lastUpdated = new Date().toISOString();
+              next.lastUpdated = nowIso;
+              next.windowDays = WINDOW_DAYS;
+              next.decayPerDay = DECAY_PER_DAY;
 
               for (const name of failed) {
-                const prevItem = next.byTest[name] || { failures: 0, lastSeen: null };
+                const prevItem = next.byTest[name] || { failures: 0, lastSeen: null, score: 0 };
                 next.byTest[name] = {
                   failures: prevItem.failures + 1,
+                  score: Number(((prevItem.score || 0) + 1).toFixed(4)),
                   lastSeen: next.lastUpdated
                 };
               }
@@ -180,13 +205,13 @@ jobs:
             const fs = require('node:fs');
             const data = JSON.parse(fs.readFileSync('reports/flake-history.json', 'utf8'));
             const items = Object.entries(data.byTest || {})
-              .sort((a, b) => (b[1].failures || 0) - (a[1].failures || 0))
+              .sort((a, b) => (b[1].score || 0) - (a[1].score || 0))
               .slice(0, 5);
             if (items.length === 0) {
               console.log('- no flaky test recorded yet');
             } else {
               for (const [name, info] of items) {
-                console.log(`- ${name}: failures=${info.failures}, lastSeen=${info.lastSeen}`);
+                console.log(`- ${name}: score=${info.score}, failures=${info.failures}, lastSeen=${info.lastSeen}`);
               }
             }
             NODE

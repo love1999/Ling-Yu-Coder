@@ -32,11 +32,11 @@
 - 单元+集成测试：`src/**/*.test.js`（当前 31 个测试均通过，覆盖 orchestrator/memory/modifier/llm（含熔断+指标）、文件系统集成、patch merge（含 `patch-ast` 语法守卫）、真实模块编排修复链路、以及主进程 IPC 处理器）。
 - E2E：`e2e/electron.e2e.test.js`（基于 Playwright Electron；当前环境无 Playwright 时自动 skip）。已覆盖 UI 主流程、审批拒绝分支，以及真实 Electron 进程级 IPC 桥接（`inspectEnvironment/loadMemory/saveMemory/runSnippet/requestApproval/getLLMHealth/probeLLMProviders/modifyCodebase`，含 runtime 超时与 patch 冲突分支）。
 - 语法校验：主流程核心文件 `node --check`（通过）。
-- CI：`.github/workflows/ci.yml` 已按分层执行：`push/PR` 运行 `npm test + e2e smoke`；`schedule/workflow_dispatch` 运行 `e2e smoke/full` matrix，并输出聚合报告（`GITHUB_STEP_SUMMARY`）。当 nightly full 失败时，会自动提取失败用例进入 quarantine rerun（隔离重跑），并把 flaky 统计写入历史缓存用于趋势追踪（按用例 failures 累积）。
+- CI：`.github/workflows/ci.yml` 已按分层执行：`push/PR` 运行 `npm test + e2e smoke`；`schedule/workflow_dispatch` 运行 `e2e smoke/full` matrix，并输出聚合报告（`GITHUB_STEP_SUMMARY`）。当 nightly full 失败时，会自动提取失败用例进入 quarantine rerun（隔离重跑），并把 flaky 统计写入历史缓存做趋势追踪（30 天窗口 + 按天衰减 score）。
 - IPC 扩展：新增 `llm:health` / `llm:probe`，用于输出 provider 状态、active provider 与熔断健康指标。
 - UI 仪表盘：`src/index.html` + `src/renderer.js` 已接入 LLM 健康看板和告警列表（open/degraded/probeSuccessRate 下降告警）。
 
 ## 4. 下一步建议
 
 1. 将健康告警接入外部通知通道（如企业微信/Slack/Webhook）。
-2. 为 flake 趋势增加衰减权重与时间窗口，避免历史旧噪声长期放大。
+2. 将 flake 趋势与 CI 告警门槛联动（例如 score 超阈值自动标红或阻断发布）。
