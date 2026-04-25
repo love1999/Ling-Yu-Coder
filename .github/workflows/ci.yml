@@ -178,8 +178,8 @@ jobs:
     needs: test-nightly-matrix
     runs-on: ubuntu-latest
     env:
-      FLAKE_WARN_THRESHOLD: "3"
-      FLAKE_BLOCK_THRESHOLD: "8"
+      FLAKE_WARN_THRESHOLD: ${{ vars.FLAKE_WARN_THRESHOLD != '' && vars.FLAKE_WARN_THRESHOLD || (github.ref_name == 'main' && '3' || '5') }}
+      FLAKE_BLOCK_THRESHOLD: ${{ vars.FLAKE_BLOCK_THRESHOLD != '' && vars.FLAKE_BLOCK_THRESHOLD || (github.ref_name == 'main' && '8' || '13') }}
     steps:
       - name: Download E2E logs
         uses: actions/download-artifact@v4

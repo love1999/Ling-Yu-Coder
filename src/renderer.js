@@ -22,6 +22,7 @@ const docEl = document.getElementById('doc');
 const providerSelect = document.getElementById('providerSelect');
 const refreshHealthBtn = document.getElementById('refreshHealthBtn');
 const webhookUrlEl = document.getElementById('webhookUrl');
+const webhookSecretEl = document.getElementById('webhookSecret');
 const saveWebhookBtn = document.getElementById('saveWebhookBtn');
 const healthSummaryEl = document.getElementById('healthSummary');
 const healthMetricsEl = document.getElementById('healthMetrics');
@@ -40,8 +41,10 @@ const alertQueue = [];
 const alertLastSent = new Map();
 const ALERT_DEDUP_MS = 5 * 60 * 1000;
 const WEBHOOK_STORAGE_KEY = 'lingyu.webhook.url';
+const WEBHOOK_SECRET_STORAGE_KEY = 'lingyu.webhook.secret';
 
 webhookUrlEl.value = localStorage.getItem(WEBHOOK_STORAGE_KEY) || '';
+webhookSecretEl.value = localStorage.getItem(WEBHOOK_SECRET_STORAGE_KEY) || '';
 
 const pushHealthAlert = (message, level = 'warn') => {
   const entry = `[${new Date().toLocaleTimeString()}][${level}] ${message}`;
@@ -52,6 +55,7 @@ const pushHealthAlert = (message, level = 'warn') => {
 
 const sendWebhookAlertIfConfigured = async ({ level, message, health }) => {
   const url = localStorage.getItem(WEBHOOK_STORAGE_KEY);
+  const secret = localStorage.getItem(WEBHOOK_SECRET_STORAGE_KEY) || '';
   if (!url) return;
 
   const dedupeKey = `${level}:${message}`;
@@ -62,13 +66,16 @@ const sendWebhookAlertIfConfigured = async ({ level, message, health }) => {
   alertLastSent.set(dedupeKey, now);
   await window.lingYuAPI.sendWebhookAlert({
     url,
+    secret,
     event: `llm.health.${level}`,
     data: {
       message,
       active: health?.active,
       providers: health?.providers,
       metrics: health?.metrics
-    }
+    },
+    maxRetries: 2,
+    backoffMs: 300
   });
 };
 
@@ -165,11 +172,14 @@ saveWebhookBtn.addEventListener('click', () => {
   const value = (webhookUrlEl.value || '').trim();
   if (!value) {
     localStorage.removeItem(WEBHOOK_STORAGE_KEY);
+    localStorage.removeItem(WEBHOOK_SECRET_STORAGE_KEY);
     pushHealthAlert('已清空外部告警 Webhook', 'warn');
     return;
   }
 
+  const secret = (webhookSecretEl.value || '').trim();
   localStorage.setItem(WEBHOOK_STORAGE_KEY, value);
+  localStorage.setItem(WEBHOOK_SECRET_STORAGE_KEY, secret);
   pushHealthAlert('已保存外部告警 Webhook', 'warn');
 });
 

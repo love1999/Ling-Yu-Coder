@@ -150,13 +150,15 @@ test('ipcHandlers: webhook alert posts payload when url is valid', async () => {
     url: 'https://example.com/hook',
     event: 'llm.health.warn',
     data: { x: 1 },
-    token: 'abc'
+    token: 'abc',
+    secret: 'secret'
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.status, 204);
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, 'https://example.com/hook');
+  assert.ok(requests[0].init.headers['x-lingyu-signature']);
 });
 
 test('ipcHandlers: webhook alert rejects invalid url', async () => {
@@ -171,4 +173,33 @@ test('ipcHandlers: webhook alert rejects invalid url', async () => {
 
   assert.equal(result.ok, false);
   assert.match(result.reason, /invalid webhook url/);
+});
+
+test('ipcHandlers: webhook alert retries and falls back to disk queue on failure', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lingyu-ipc-'));
+  let calls = 0;
+  const harness = createIpcHarness(
+    { userData: root, documents: root },
+    {
+      httpPost: async () => {
+        calls += 1;
+        throw new Error('network down');
+      }
+    }
+  );
+
+  const result = await harness.invoke('alert:webhook', {
+    url: 'https://example.com/hook',
+    event: 'llm.health.warn',
+    data: { x: 1 },
+    maxRetries: 1,
+    backoffMs: 50
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(calls, 2);
+
+  const queueRaw = await fs.readFile(path.join(root, 'alert-failed-queue.jsonl'), 'utf8');
+  assert.match(queueRaw, /llm\.health\.warn/);
+  assert.match(queueRaw, /network down/);
 });
