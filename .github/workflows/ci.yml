@@ -64,7 +64,29 @@ jobs:
           set -euo pipefail
           mkdir -p reports
           if [ "${{ matrix.suite }}" = "full" ]; then
-            xvfb-run -a npm run test:e2e:full | tee "reports/e2e-full.log" || xvfb-run -a npm run test:e2e:full | tee -a "reports/e2e-full.log"
+            set +e
+            xvfb-run -a npm run test:e2e:full | tee "reports/e2e-full.log"
+            first_rc=$?
+            set -e
+
+            if [ "${first_rc}" -ne 0 ]; then
+              grep -E '^not ok [0-9]+ - ' "reports/e2e-full.log" | sed -E 's/^not ok [0-9]+ - //' > "reports/quarantine-full.txt" || true
+              if [ -s "reports/quarantine-full.txt" ]; then
+                pattern=""
+                while IFS= read -r failed_name; do
+                  escaped="$(printf '%s' "${failed_name}" | sed -e 's/[.[\*^$()+?{}|\\]/\\&/g')"
+                  if [ -z "${pattern}" ]; then
+                    pattern="${escaped}"
+                  else
+                    pattern="${pattern}|${escaped}"
+                  fi
+                done < "reports/quarantine-full.txt"
+
+                echo "Quarantine rerun pattern: ${pattern}" | tee "reports/quarantine-rerun.log"
+                xvfb-run -a node --test --test-name-pattern="${pattern}" e2e/**/*.test.js | tee -a "reports/quarantine-rerun.log"
+              fi
+              exit "${first_rc}"
+            fi
           else
             xvfb-run -a npm run test:e2e:smoke | tee "reports/e2e-smoke.log"
           fi

@@ -31,6 +31,11 @@ main {
   display: flex;
   gap: 8px;
 }
+.provider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 button {
   border: none;
   border-radius: 8px;
@@ -40,6 +45,33 @@ button {
   cursor: pointer;
 }
 button:hover { opacity: 0.9; }
+.ghost-btn {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+.health-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 12px;
+  background: #fff;
+}
+.health-ok {
+  color: #047857;
+}
+.health-warn {
+  color: #b45309;
+}
+.health-danger {
+  color: #b91c1c;
+}
+.alerts {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 100px;
+  overflow: auto;
+  font-size: 13px;
+}
 pre {
   border: 1px solid #e2e8f0;
   background: #fff;

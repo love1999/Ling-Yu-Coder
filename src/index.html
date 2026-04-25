@@ -15,6 +15,7 @@
           <option value="online">在线模型</option>
           <option value="local">本地模型</option>
         </select>
+        <button id="refreshHealthBtn" class="ghost-btn">刷新健康状态</button>
       </div>
     </header>
 
@@ -28,6 +29,12 @@
       </section>
 
       <section class="right-pane">
+        <h2>LLM 健康仪表盘</h2>
+        <div id="llmHealthPanel" class="health-panel">
+          <div id="healthSummary">加载中...</div>
+          <pre id="healthMetrics"></pre>
+          <ul id="healthAlerts" class="alerts"></ul>
+        </div>
         <h2>执行日志</h2>
         <pre id="log"></pre>
         <h2>生成文档</h2>

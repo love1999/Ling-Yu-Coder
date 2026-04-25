@@ -48,6 +48,8 @@ npm run test:e2e:full
 
 项目已提供 GitHub Actions CI（`.github/workflows/ci.yml`）：`push/PR` 执行 `npm test + E2E smoke`；`schedule/workflow_dispatch` 以 matrix 执行 `smoke/full`，并生成 E2E 聚合报告（`GITHUB_STEP_SUMMARY`）。
 
+UI 已接入 LLM 健康仪表盘：展示 active provider、online/local 状态、健康指标，并在熔断/退化/探测成功率下降时写入告警列表。
+
 ## 项目结构
 
 ```text
