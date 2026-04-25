@@ -47,6 +47,7 @@ npm run test:e2e:full
 > `npm run test:e2e` 当前包含三类 Electron E2E：UI 主流程（点击运行并生成文档）、审批拒绝分支验证，以及预加载 `lingYuAPI` 的真实进程级 IPC 桥接验证（环境检测/记忆读写/运行沙箱含超时分支/审批门禁/LLM 健康探测/代码修改冲突分支）。
 
 项目已提供 GitHub Actions CI（`.github/workflows/ci.yml`）：`push/PR` 执行 `npm test + E2E smoke`；`schedule/workflow_dispatch` 以 matrix 执行 `smoke/full`，并生成 E2E 聚合报告（`GITHUB_STEP_SUMMARY`）。
+nightly full 失败时会触发 quarantine rerun，并把失败用例累计到 flake history（按测试名统计频率）用于趋势观察。
 
 UI 已接入 LLM 健康仪表盘：展示 active provider、online/local 状态、健康指标，并在熔断/退化/探测成功率下降时写入告警列表。
 

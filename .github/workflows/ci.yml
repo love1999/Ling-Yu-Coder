@@ -58,6 +58,15 @@ jobs:
       - name: Install Playwright (Chromium)
         run: npx playwright install --with-deps chromium
 
+      - name: Restore flake history cache
+        if: matrix.suite == 'full'
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci/flake-history.json
+          key: flake-history-${{ github.run_id }}
+          restore-keys: |
+            flake-history-
+
       - name: Run Electron E2E suite
         shell: bash
         run: |
@@ -85,18 +94,59 @@ jobs:
                 echo "Quarantine rerun pattern: ${pattern}" | tee "reports/quarantine-rerun.log"
                 xvfb-run -a node --test --test-name-pattern="${pattern}" e2e/**/*.test.js | tee -a "reports/quarantine-rerun.log"
               fi
+
+              node - <<'NODE'
+              const fs = require('node:fs');
+              const path = require('node:path');
+
+              const histPath = path.join('.ci', 'flake-history.json');
+              const quarantinePath = path.join('reports', 'quarantine-full.txt');
+              const outPath = path.join('reports', 'flake-history.json');
+
+              const prev = fs.existsSync(histPath)
+                ? JSON.parse(fs.readFileSync(histPath, 'utf8'))
+                : { byTest: {}, runs: 0, lastUpdated: null };
+
+              const failed = fs.existsSync(quarantinePath)
+                ? fs.readFileSync(quarantinePath, 'utf8').split('\n').map((s) => s.trim()).filter(Boolean)
+                : [];
+
+              const next = { ...prev, byTest: { ...(prev.byTest || {}) } };
+              next.runs = (next.runs || 0) + 1;
+              next.lastUpdated = new Date().toISOString();
+
+              for (const name of failed) {
+                const prevItem = next.byTest[name] || { failures: 0, lastSeen: null };
+                next.byTest[name] = {
+                  failures: prevItem.failures + 1,
+                  lastSeen: next.lastUpdated
+                };
+              }
+
+              fs.mkdirSync('.ci', { recursive: true });
+              fs.writeFileSync(histPath, JSON.stringify(next, null, 2));
+              fs.writeFileSync(outPath, JSON.stringify(next, null, 2));
+              NODE
+
               exit "${first_rc}"
             fi
           else
             xvfb-run -a npm run test:e2e:smoke | tee "reports/e2e-smoke.log"
           fi
 
+      - name: Save flake history cache
+        if: always() && matrix.suite == 'full'
+        uses: actions/cache/save@v4
+        with:
+          path: .ci/flake-history.json
+          key: flake-history-${{ github.run_id }}
+
       - name: Upload E2E logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: e2e-logs-${{ matrix.suite }}
-          path: reports/*.log
+          path: reports/*
 
   e2e-report:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -122,3 +172,22 @@ jobs:
             skipped="$(grep -E '^# skipped ' "$file" | awk '{print $3}' || echo 0)"
             echo "- ${suite}: pass=${pass}, fail=${fail}, skipped=${skipped}" >> "$GITHUB_STEP_SUMMARY"
           done
+
+          if [ -f reports/flake-history.json ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "## Flake Trend (Top 5)" >> "$GITHUB_STEP_SUMMARY"
+            node - <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+            const fs = require('node:fs');
+            const data = JSON.parse(fs.readFileSync('reports/flake-history.json', 'utf8'));
+            const items = Object.entries(data.byTest || {})
+              .sort((a, b) => (b[1].failures || 0) - (a[1].failures || 0))
+              .slice(0, 5);
+            if (items.length === 0) {
+              console.log('- no flaky test recorded yet');
+            } else {
+              for (const [name, info] of items) {
+                console.log(`- ${name}: failures=${info.failures}, lastSeen=${info.lastSeen}`);
+              }
+            }
+            NODE
+          fi
