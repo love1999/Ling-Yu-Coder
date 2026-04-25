@@ -1,11 +1,38 @@
 import { ErrorCode, createErrorResponse, createOkResponse, validateEnvelope } from '../core/protocol.js';
 
+const nowTs = () => Date.now();
+
+const defaultPolicy = {
+  failureThreshold: 3,
+  cooldownMs: 30_000
+};
+
 export class LLMManager {
-  constructor() {
+  constructor(policy = {}) {
     this.name = 'LLM Manage';
+    this.policy = {
+      ...defaultPolicy,
+      ...policy
+    };
     this.providers = {
-      online: { enabled: true, name: 'Online API Provider', healthy: true },
-      local: { enabled: true, name: 'Local Model Provider', healthy: true }
+      online: {
+        enabled: true,
+        name: 'Online API Provider',
+        healthy: true,
+        state: 'healthy',
+        consecutiveFailures: 0,
+        lastSuccessTs: null,
+        cooldownUntil: null
+      },
+      local: {
+        enabled: true,
+        name: 'Local Model Provider',
+        healthy: true,
+        state: 'healthy',
+        consecutiveFailures: 0,
+        lastSuccessTs: null,
+        cooldownUntil: null
+      }
     };
     this.active = 'online';
     this.healthTimer = null;
@@ -26,10 +53,47 @@ export class LLMManager {
     this.providers[mode].healthy = Boolean(healthy);
   }
 
+  recordProbeResult(mode, healthy) {
+    const provider = this.providers[mode];
+    if (!provider) return;
+
+    if (healthy) {
+      provider.consecutiveFailures = 0;
+      provider.lastSuccessTs = nowTs();
+      provider.state = 'healthy';
+      provider.cooldownUntil = null;
+      return;
+    }
+
+    provider.consecutiveFailures += 1;
+    provider.state = provider.consecutiveFailures >= this.policy.failureThreshold ? 'open' : 'degraded';
+
+    if (provider.state === 'open') {
+      provider.cooldownUntil = nowTs() + this.policy.cooldownMs;
+    }
+  }
+
+  isProviderAvailable(mode) {
+    const provider = this.providers[mode];
+    if (!provider || !provider.enabled) return false;
+
+    if (provider.state !== 'open') return true;
+
+    if (provider.cooldownUntil && nowTs() >= provider.cooldownUntil) {
+      provider.state = 'degraded';
+      provider.cooldownUntil = null;
+      return true;
+    }
+
+    return false;
+  }
+
   async checkProviderHealth(mode) {
     const provider = this.providers[mode];
     if (!provider || !provider.enabled) return false;
-    return provider.healthy;
+    const healthy = provider.healthy;
+    this.recordProbeResult(mode, healthy);
+    return healthy;
   }
 
   async probeAllProviders() {
@@ -66,9 +130,9 @@ export class LLMManager {
 
   resolveProvider() {
     const current = this.providers[this.active];
-    if (current?.healthy && current.enabled) return this.active;
+    if (current?.healthy && this.isProviderAvailable(this.active)) return this.active;
 
-    const fallback = Object.entries(this.providers).find(([, provider]) => provider.enabled && provider.healthy);
+    const fallback = Object.entries(this.providers).find(([mode, provider]) => provider.healthy && this.isProviderAvailable(mode));
     if (!fallback) return null;
 
     this.active = fallback[0];
@@ -83,7 +147,7 @@ export class LLMManager {
       const chosen = this.resolveProvider();
 
       if (!chosen) {
-        const error = new Error('没有可用的 LLM provider');
+        const error = new Error('没有可用的 LLM provider（可能处于熔断冷却）');
         error.code = ErrorCode.PROVIDER;
         throw error;
       }
@@ -91,7 +155,7 @@ export class LLMManager {
       return createOkResponse(envelope, {
         activeProvider: chosen,
         providers: this.providers,
-        healthStatus: 'healthy',
+        healthStatus: this.providers[chosen].state,
         completion: `[${chosen}] 模型回执: ${prompt.slice(0, 80)}`
       }, Date.now() - start);
     } catch (error) {

@@ -30,3 +30,27 @@ test('llm manager health probe start/stop works', () => {
   assert.equal(started, true);
   assert.equal(stopped, true);
 });
+
+test('llm manager opens circuit after consecutive failures', async () => {
+  const manager = new LLMManager({ failureThreshold: 2, cooldownMs: 1000 });
+  manager.setProviderHealth('online', false);
+
+  await manager.checkProviderHealth('online');
+  await manager.checkProviderHealth('online');
+
+  const provider = manager.listProviders().online;
+  assert.equal(provider.state, 'open');
+  assert.equal(manager.isProviderAvailable('online'), false);
+});
+
+test('llm manager allows provider again after cooldown', async () => {
+  const manager = new LLMManager({ failureThreshold: 1, cooldownMs: 5 });
+  manager.setProviderHealth('online', false);
+
+  await manager.checkProviderHealth('online');
+  assert.equal(manager.listProviders().online.state, 'open');
+
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(manager.isProviderAvailable('online'), true);
+  assert.equal(manager.listProviders().online.state, 'degraded');
+});
