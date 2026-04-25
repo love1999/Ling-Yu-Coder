@@ -1,0 +1,277 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - work
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
+
+jobs:
+  test-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run unit + integration tests
+        run: npm test
+
+      - name: Install Playwright (Chromium)
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Electron E2E smoke tests
+        run: xvfb-run -a npm run test:e2e:smoke
+
+  test-nightly-matrix:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [smoke, full]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright (Chromium)
+        run: npx playwright install --with-deps chromium
+
+      - name: Restore flake history cache
+        if: matrix.suite == 'full'
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci/flake-history.json
+          key: flake-history-${{ github.run_id }}
+          restore-keys: |
+            flake-history-
+
+      - name: Run Electron E2E suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          if [ "${{ matrix.suite }}" = "full" ]; then
+            set +e
+            xvfb-run -a npm run test:e2e:full | tee "reports/e2e-full.log"
+            first_rc=$?
+            set -e
+
+            if [ "${first_rc}" -ne 0 ]; then
+              grep -E '^not ok [0-9]+ - ' "reports/e2e-full.log" | sed -E 's/^not ok [0-9]+ - //' > "reports/quarantine-full.txt" || true
+              if [ -s "reports/quarantine-full.txt" ]; then
+                pattern=""
+                while IFS= read -r failed_name; do
+                  escaped="$(printf '%s' "${failed_name}" | sed -e 's/[.[\*^$()+?{}|\\]/\\&/g')"
+                  if [ -z "${pattern}" ]; then
+                    pattern="${escaped}"
+                  else
+                    pattern="${pattern}|${escaped}"
+                  fi
+                done < "reports/quarantine-full.txt"
+
+                echo "Quarantine rerun pattern: ${pattern}" | tee "reports/quarantine-rerun.log"
+                xvfb-run -a node --test --test-name-pattern="${pattern}" e2e/**/*.test.js | tee -a "reports/quarantine-rerun.log"
+              fi
+
+              node - <<'NODE'
+              const fs = require('node:fs');
+              const path = require('node:path');
+
+              const histPath = path.join('.ci', 'flake-history.json');
+              const quarantinePath = path.join('reports', 'quarantine-full.txt');
+              const outPath = path.join('reports', 'flake-history.json');
+              const WINDOW_DAYS = 30;
+              const DECAY_PER_DAY = 0.9;
+
+              const prev = fs.existsSync(histPath)
+                ? JSON.parse(fs.readFileSync(histPath, 'utf8'))
+                : { byTest: {}, runs: 0, lastUpdated: null };
+
+              const failed = fs.existsSync(quarantinePath)
+                ? fs.readFileSync(quarantinePath, 'utf8').split('\n').map((s) => s.trim()).filter(Boolean)
+                : [];
+
+              const next = { ...prev, byTest: { ...(prev.byTest || {}) } };
+              const now = new Date();
+              const nowIso = now.toISOString();
+
+              for (const [name, item] of Object.entries(next.byTest)) {
+                const last = item.lastSeen ? new Date(item.lastSeen) : now;
+                const days = Math.max(0, Math.floor((now - last) / (1000 * 60 * 60 * 24)));
+
+                if (days > WINDOW_DAYS) {
+                  delete next.byTest[name];
+                  continue;
+                }
+
+                const prevScore = typeof item.score === 'number' ? item.score : (item.failures || 0);
+                const decayedScore = prevScore * (DECAY_PER_DAY ** days);
+                next.byTest[name] = {
+                  ...item,
+                  score: Number(decayedScore.toFixed(4))
+                };
+              }
+
+              next.runs = (next.runs || 0) + 1;
+              next.lastUpdated = nowIso;
+              next.windowDays = WINDOW_DAYS;
+              next.decayPerDay = DECAY_PER_DAY;
+
+              for (const name of failed) {
+                const prevItem = next.byTest[name] || { failures: 0, lastSeen: null, score: 0 };
+                next.byTest[name] = {
+                  failures: prevItem.failures + 1,
+                  score: Number(((prevItem.score || 0) + 1).toFixed(4)),
+                  lastSeen: next.lastUpdated
+                };
+              }
+
+              fs.mkdirSync('.ci', { recursive: true });
+              fs.writeFileSync(histPath, JSON.stringify(next, null, 2));
+              fs.writeFileSync(outPath, JSON.stringify(next, null, 2));
+              NODE
+
+              exit "${first_rc}"
+            fi
+          else
+            xvfb-run -a npm run test:e2e:smoke | tee "reports/e2e-smoke.log"
+          fi
+
+      - name: Save flake history cache
+        if: always() && matrix.suite == 'full'
+        uses: actions/cache/save@v4
+        with:
+          path: .ci/flake-history.json
+          key: flake-history-${{ github.run_id }}
+
+      - name: Upload E2E logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs-${{ matrix.suite }}
+          path: reports/*
+
+  e2e-report:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: test-nightly-matrix
+    runs-on: ubuntu-latest
+    env:
+      FLAKE_WARN_THRESHOLD: ${{ vars.FLAKE_WARN_THRESHOLD != '' && vars.FLAKE_WARN_THRESHOLD || (github.ref_name == 'main' && '3' || '5') }}
+      FLAKE_BLOCK_THRESHOLD: ${{ vars.FLAKE_BLOCK_THRESHOLD != '' && vars.FLAKE_BLOCK_THRESHOLD || (github.ref_name == 'main' && '8' || '13') }}
+      FLAKE_GATE_SILENT_WINDOW_UTC: ${{ vars.FLAKE_GATE_SILENT_WINDOW_UTC != '' && vars.FLAKE_GATE_SILENT_WINDOW_UTC || '00:00-00:00' }}
+      FLAKE_GATE_WARN_ONLY: ${{ vars.FLAKE_GATE_WARN_ONLY != '' && vars.FLAKE_GATE_WARN_ONLY || 'false' }}
+    steps:
+      - name: Download E2E logs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: e2e-logs-*
+          merge-multiple: true
+          path: reports
+
+      - name: Build E2E summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "## E2E Matrix Summary" >> "$GITHUB_STEP_SUMMARY"
+          for file in reports/*.log; do
+            suite="$(basename "$file" .log)"
+            pass="$(grep -E '^# pass ' "$file" | awk '{print $3}' || echo 0)"
+            fail="$(grep -E '^# fail ' "$file" | awk '{print $3}' || echo 0)"
+            skipped="$(grep -E '^# skipped ' "$file" | awk '{print $3}' || echo 0)"
+            echo "- ${suite}: pass=${pass}, fail=${fail}, skipped=${skipped}" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          if [ -f reports/flake-history.json ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "## Flake Trend (Top 5)" >> "$GITHUB_STEP_SUMMARY"
+            node - <<'NODE' >> "$GITHUB_STEP_SUMMARY"
+            const fs = require('node:fs');
+            const data = JSON.parse(fs.readFileSync('reports/flake-history.json', 'utf8'));
+            const items = Object.entries(data.byTest || {})
+              .sort((a, b) => (b[1].score || 0) - (a[1].score || 0))
+              .slice(0, 5);
+            if (items.length === 0) {
+              console.log('- no flaky test recorded yet');
+            } else {
+              for (const [name, info] of items) {
+                console.log(`- ${name}: score=${info.score}, failures=${info.failures}, lastSeen=${info.lastSeen}`);
+              }
+            }
+            NODE
+          fi
+
+      - name: Enforce flake alert gate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f reports/flake-history.json ]; then
+            echo "No flake history file, skip gate."
+            exit 0
+          fi
+
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const data = JSON.parse(fs.readFileSync('reports/flake-history.json', 'utf8'));
+          const entries = Object.entries(data.byTest || {});
+          const maxScore = entries.reduce((m, [, info]) => Math.max(m, Number(info.score || 0)), 0);
+          const warn = Number(process.env.FLAKE_WARN_THRESHOLD || 3);
+          const block = Number(process.env.FLAKE_BLOCK_THRESHOLD || 8);
+          const forceWarnOnly = String(process.env.FLAKE_GATE_WARN_ONLY || 'false').toLowerCase() === 'true';
+          const window = process.env.FLAKE_GATE_SILENT_WINDOW_UTC || '00:00-00:00';
+
+          const toMinutes = (hhmm) => {
+            const [h, m] = String(hhmm || '').split(':').map((v) => Number(v));
+            if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+            return (h * 60) + m;
+          };
+
+          const inSilentWindow = (() => {
+            const [startRaw, endRaw] = window.split('-');
+            const start = toMinutes(startRaw);
+            const end = toMinutes(endRaw);
+            if (start === null || end === null || start === end) return false;
+            const now = new Date();
+            const nowMin = (now.getUTCHours() * 60) + now.getUTCMinutes();
+            if (start < end) return nowMin >= start && nowMin < end;
+            return nowMin >= start || nowMin < end;
+          })();
+
+          const warnOnlyMode = forceWarnOnly || inSilentWindow;
+          if (warnOnlyMode) {
+            console.log(`::warning::Flake gate running in warn-only mode (force=${forceWarnOnly}, window=${window}, inWindow=${inSilentWindow})`);
+          }
+
+          if (!warnOnlyMode && maxScore >= block) {
+            console.error(`Flake gate BLOCKED: maxScore=${maxScore} >= block=${block}`);
+            process.exit(1);
+          }
+
+          if (maxScore >= warn) {
+            console.log(`::warning::Flake gate warning: maxScore=${maxScore} >= warn=${warn}`);
+          } else {
+            console.log(`Flake gate passed: maxScore=${maxScore}, warn=${warn}, block=${block}`);
+          }
+          NODE

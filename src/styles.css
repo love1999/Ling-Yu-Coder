@@ -1,0 +1,91 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #0f172a;
+  background: #f8fafc;
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #cbd5e1;
+  background: #fff;
+}
+main {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  min-height: calc(100vh - 65px);
+}
+.left-pane, .right-pane { padding: 16px; }
+#editor {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  height: 70vh;
+  overflow: hidden;
+  background: #fff;
+}
+.actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+}
+.provider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+input {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 8px 10px;
+  min-width: 220px;
+}
+button {
+  border: none;
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: #4f46e5;
+  color: #fff;
+  cursor: pointer;
+}
+button:hover { opacity: 0.9; }
+.ghost-btn {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+.health-panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 12px;
+  background: #fff;
+}
+.health-ok {
+  color: #047857;
+}
+.health-warn {
+  color: #b45309;
+}
+.health-danger {
+  color: #b91c1c;
+}
+.alerts {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 100px;
+  overflow: auto;
+  font-size: 13px;
+}
+pre {
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  border-radius: 8px;
+  padding: 10px;
+  min-height: 160px;
+  max-height: 30vh;
+  overflow: auto;
+  white-space: pre-wrap;
+}
