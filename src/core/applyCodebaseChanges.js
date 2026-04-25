@@ -4,6 +4,75 @@ import { createHash } from 'node:crypto';
 
 const textHash = (content) => createHash('sha1').update(content || '').digest('hex');
 
+const threeWayLineMerge = ({ base, current, incoming }) => {
+  const baseLines = (base || '').split('\n');
+  const currentLines = (current || '').split('\n');
+  const incomingLines = (incoming || '').split('\n');
+  const max = Math.max(baseLines.length, currentLines.length, incomingLines.length);
+
+  const merged = [];
+  let hasConflict = false;
+
+  for (let i = 0; i < max; i += 1) {
+    const b = baseLines[i] ?? '';
+    const c = currentLines[i] ?? '';
+    const n = incomingLines[i] ?? '';
+
+    if (c === n) {
+      merged.push(c);
+      continue;
+    }
+
+    if (c === b) {
+      merged.push(n);
+      continue;
+    }
+
+    if (n === b) {
+      merged.push(c);
+      continue;
+    }
+
+    hasConflict = true;
+    merged.push('<<<<<<< CURRENT');
+    merged.push(c);
+    merged.push('=======');
+    merged.push(n);
+    merged.push('>>>>>>> INCOMING');
+  }
+
+  return {
+    mergedContent: merged.join('\n'),
+    hasConflict
+  };
+};
+
+const tryPatchMerge = ({ currentContent, incomingContent, change, options }) => {
+  if (options.mergeStrategy !== 'patch') {
+    return { merged: false, reason: 'merge strategy disabled' };
+  }
+
+  if (typeof change.baseContent !== 'string') {
+    return { merged: false, reason: 'missing baseContent for patch merge' };
+  }
+
+  const mergeResult = threeWayLineMerge({
+    base: change.baseContent,
+    current: currentContent || '',
+    incoming: incomingContent || ''
+  });
+
+  if (mergeResult.hasConflict && !options.allowConflictMarkers) {
+    return { merged: false, reason: 'patch merge conflict' };
+  }
+
+  return {
+    merged: true,
+    mergedContent: mergeResult.mergedContent,
+    hasConflict: mergeResult.hasConflict
+  };
+};
+
 export const applyCodebaseChanges = async ({ root, changes, options = {} }) => {
   const normalizedRoot = path.resolve(root);
   const applied = [];
@@ -30,19 +99,41 @@ export const applyCodebaseChanges = async ({ root, changes, options = {} }) => {
         existed = false;
       }
 
-      if (change.expectedHash && textHash(content || '') !== change.expectedHash) {
-        failed.push({ path: change.path, reason: '冲突: 文件已变更（hash 不匹配）' });
-        if (transactional) break;
-        continue;
-      }
-
       backups.push({ path: filePath, existed, content });
+
+      let nextContent = change.content;
+      let merged = false;
+      let mergeConflict = false;
+
+      if (change.expectedHash && textHash(content || '') !== change.expectedHash) {
+        const patchMerge = tryPatchMerge({
+          currentContent: content || '',
+          incomingContent: change.content,
+          change,
+          options
+        });
+
+        if (!patchMerge.merged) {
+          failed.push({ path: change.path, reason: `冲突: 文件已变更（hash 不匹配），${patchMerge.reason}` });
+          if (transactional) break;
+          continue;
+        }
+
+        nextContent = patchMerge.mergedContent;
+        merged = true;
+        mergeConflict = Boolean(patchMerge.hasConflict);
+      }
 
       if (!dryRun) {
         await fs.mkdir(path.dirname(filePath), { recursive: true });
-        await fs.writeFile(filePath, change.content, 'utf8');
+        await fs.writeFile(filePath, nextContent, 'utf8');
       }
-      applied.push(change.path);
+
+      applied.push({
+        path: change.path,
+        merged,
+        mergeConflict
+      });
     } catch (error) {
       failed.push({ path: change.path, reason: error.message });
       if (transactional) break;
@@ -76,3 +167,4 @@ export const applyCodebaseChanges = async ({ root, changes, options = {} }) => {
 };
 
 export const hashContent = textHash;
+export const mergePatchContent = threeWayLineMerge;

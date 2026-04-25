@@ -64,4 +64,4 @@ npm test
 3. Approval Gate 确认后，Act Agent 执行变更。
 4. Compiler + Runtime 执行质量闸门（支持失败后自动修复重试）。
 5. Documentation Writer 输出结果文档。
-6. Memory Module 保存关键摘要（支持 TTL/数量裁剪/过期归档），Codebase Modifier 以 transactional + 冲突检测方式回写产物。
+6. Memory Module 保存关键摘要（支持 TTL/数量裁剪/过期归档），Codebase Modifier 以 transactional + 冲突检测 + patch-level 合并方式回写产物。
