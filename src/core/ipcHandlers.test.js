@@ -86,6 +86,15 @@ test('ipcHandlers: runtime run captures error', async () => {
   assert.match(result.error, /boom/);
 });
 
+test('ipcHandlers: runtime run returns timeout error for infinite loop', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lingyu-ipc-'));
+  const harness = createIpcHarness({ userData: root, documents: root });
+
+  const result = await harness.invoke('runtime:run', 'while(true){}');
+  assert.equal(result.ok, false);
+  assert.match(result.error, /Script execution timed out/);
+});
+
 test('ipcHandlers: codebase modify uses default documents root', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'lingyu-ipc-'));
   const harness = createIpcHarness({ userData: root, documents: root });

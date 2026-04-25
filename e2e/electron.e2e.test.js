@@ -116,6 +116,10 @@ test('electron e2e: preload IPC bridge works in real process', async (t) => {
     assert.equal(runtime.ok, true);
     assert.deepEqual(runtime.logs, ['ipc-ok']);
 
+    const timeout = await page.evaluate(() => window.lingYuAPI.runSnippet('while(true){}'));
+    assert.equal(timeout.ok, false);
+    assert.match(timeout.error || '', /Script execution timed out/);
+
     const approved = await page.evaluate(() => window.lingYuAPI.requestApproval('E2E approval'));
     assert.equal(approved, true);
 
