@@ -19,7 +19,7 @@
 | Approval Gate | `src/core/approvalGate.js` | ✅ 已实现 | 写操作前审批门禁 |
 | Memory Module | `src/core/memoryModule.js` | ✅ 已实现 | 本地持久化记忆读写 + TTL/最大条数裁剪 + 过期归档 |
 | Environment Inspector | `src/core/environmentInspector.js` | ✅ 已实现 | 环境快照采集 |
-| Codebase Modifier | `src/core/codebaseModifier.js` | ✅ 已实现 | 多文件写入结果汇总 + transactional/dry-run 支持 |
+| Codebase Modifier | `src/core/codebaseModifier.js` | ✅ 已实现 | 多文件写入结果汇总 + transactional/dry-run + expectedHash 冲突检测 |
 
 ## 2. 文档提交清单
 
@@ -29,12 +29,12 @@
 
 ## 3. 测试与验证状态
 
-- 单元测试：`src/**/*.test.js`（当前 9 个测试均通过，覆盖 orchestrator/memory/modifier/llm）。
+- 单元测试：`src/**/*.test.js`（当前 13 个测试均通过，覆盖 orchestrator/memory/modifier/llm 与文件系统集成场景）。
 - 语法校验：主流程核心文件 `node --check`（通过）。
 
 ## 4. 下一步建议
 
-1. 为 CodebaseModifier 增加冲突检测与 patch-level 合并策略。
-2. 为 LLM Manage 增加 provider 健康探测定时任务。
-3. 引入端到端 UI 自动化测试（Playwright/Electron E2E）。
-4. 增加真实文件系统集成测试（含 transactional rollback 校验）。
+1. 为 CodebaseModifier 增加 patch-level 合并策略（当前已有冲突检测）。
+2. 引入端到端 UI 自动化测试（Playwright/Electron E2E）。
+3. 增加主进程 IPC 层集成测试（Electron 环境）。
+4. 提升 LLM provider 健康探测为分级熔断策略。
