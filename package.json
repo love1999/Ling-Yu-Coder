@@ -17,5 +17,8 @@
     "@codemirror/view": "^6.38.6",
     "acorn": "^8.15.0",
     "electron": "^37.2.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.54.2"
   }
 }

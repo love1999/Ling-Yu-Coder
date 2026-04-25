@@ -32,9 +32,9 @@
 - 单元+集成测试：`src/**/*.test.js`（当前 28 个测试均通过，覆盖 orchestrator/memory/modifier/llm（含熔断+指标）、文件系统集成、patch merge（含 `patch-ast` 语法守卫）、真实模块编排修复链路、以及主进程 IPC 处理器）。
 - E2E：`e2e/electron.e2e.test.js`（基于 Playwright Electron；当前环境无 Playwright 时自动 skip）。新增 **真实 Electron 进程级 IPC 桥接 E2E**，覆盖 `inspectEnvironment/loadMemory/saveMemory/runSnippet/requestApproval` 全链路。
 - 语法校验：主流程核心文件 `node --check`（通过）。
+- CI：新增 `.github/workflows/ci.yml`，在 Ubuntu 上自动执行 `npm test` + Playwright Chromium 安装 + `xvfb-run npm run test:e2e`。
 
 ## 4. 下一步建议
 
-1. 为 patch-level 合并增加 AST/语法感知能力（当前为行级三方合并）。
-2. 端到端 UI 自动化测试（Playwright/Electron E2E）已落地基础用例，待 CI 环境补齐 Playwright 依赖与稳定性策略。
-3. 将 LLM 熔断与健康指标接入 UI 仪表盘与告警通道。
+1. 将 LLM 熔断与健康指标接入 UI 仪表盘与告警通道。
+2. 增加失败场景 E2E（审批拒绝、运行超时、冲突回滚）并在 CI 中分层执行（smoke/nightly）。
