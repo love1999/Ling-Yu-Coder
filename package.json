@@ -7,7 +7,9 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "test": "node --test src/**/*.test.js"
+    "test": "node --test src/**/*.test.js",
+    "test:e2e": "node --test e2e/**/*.test.js",
+    "test:all": "npm test && npm run test:e2e"
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.4",

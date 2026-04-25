@@ -38,6 +38,7 @@
 npm install
 npm run start
 npm test
+npm run test:e2e
 ```
 
 ## 项目结构
